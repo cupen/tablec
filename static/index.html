@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TableC Web UI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="text"], input[type="file"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            margin: 0;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .results {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .results.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .results.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: #e9ecef;
+            border: none;
+            cursor: pointer;
+            margin-right: 2px;
+            border-radius: 4px 4px 0 0;
+        }
+
+        .tab.active {
+            background: #007bff;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .progress {
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>TableC Web UI</h1>
+            <p>Process Excel files into structured data formats</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('build')">Build</button>
+            <button class="tab" onclick="showTab('check')">Check</button>
+            <button class="tab" onclick="showTab('info')">Info</button>
+        </div>
+
+        <div id="build-tab" class="tab-content active">
+            <div class="card">
+                <h2>Build Data</h2>
+                <form id="build-form">
+                    <div class="form-group">
+                        <label for="input-file">Input File:</label>
+                        <input type="text" id="input-file" placeholder="path/to/input.xlsx" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="output-file">Output File:</label>
+                        <input type="text" id="output-file" placeholder="path/to/output.json" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="format">Format:</label>
+                        <select id="format">
+                            <option value="json">JSON</option>
+                            <option value="msgpack">MessagePack</option>
+                            <option value="protobuf">Protocol Buffers</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="include-fields">
+                            <label for="include-fields">Include field metadata</label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit">Build</button>
+                    <button type="button" onclick="loadFormats()">Refresh Formats</button>
+                </form>
+                
+                <div id="build-results" class="results"></div>
+            </div>
+        </div>
+
+        <div id="check-tab" class="tab-content">
+            <div class="card">
+                <h2>Check Tables</h2>
+                <form id="check-form">
+                    <div class="form-group">
+                        <label for="check-path">Path:</label>
+                        <input type="text" id="check-path" placeholder="path/to/excel/files" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="check-verbose">
+                            <label for="check-verbose">Verbose output</label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit">Check</button>
+                </form>
+                
+                <div id="check-results" class="results"></div>
+            </div>
+        </div>
+
+        <div id="info-tab" class="tab-content">
+            <div class="card">
+                <h2>Information</h2>
+                <p><strong>Supported Formats:</strong></p>
+                <ul id="supported-formats">
+                    <li>Loading...</li>
+                </ul>
+                
+                <p><strong>API Endpoints:</strong></p>
+                <ul>
+                    <li><code>GET /api/health</code> - Health check</li>
+                    <li><code>POST /api/build</code> - Build data from Excel</li>
+                    <li><code>POST /api/check</code> - Check Excel files</li>
+                    <li><code>GET /api/formats</code> - Supported formats</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            
+            // Remove active class from all tab buttons
+            const tabButtons = document.querySelectorAll('.tab');
+            tabButtons.forEach(button => button.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function showResults(elementId, message, isSuccess) {
+            const results = document.getElementById(elementId);
+            results.textContent = message;
+            results.className = 'results ' + (isSuccess ? 'success' : 'error');
+            results.style.display = 'block';
+        }
+
+        function hideResults(elementId) {
+            const results = document.getElementById(elementId);
+            results.style.display = 'none';
+        }
+
+        async function loadFormats() {
+            try {
+                const response = await fetch('/api/formats');
+                const data = await response.json();
+                if (data.success) {
+                    const formatsList = document.getElementById('supported-formats');
+                    formatsList.innerHTML = '';
+                    data.data.forEach(format => {
+                        const li = document.createElement('li');
+                        li.textContent = format;
+                        formatsList.appendChild(li);
+                    });
+                    
+                    // Update format select
+                    const formatSelect = document.getElementById('format');
+                    formatSelect.innerHTML = '';
+                    data.data.forEach(format => {
+                        const option = document.createElement('option');
+                        option.value = format;
+                        option.textContent = format.toUpperCase();
+                        formatSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load formats:', error);
+            }
+        }
+
+        document.getElementById('build-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                input: document.getElementById('input-file').value,
+                output: document.getElementById('output-file').value,
+                format: document.getElementById('format').value,
+                include_fields: document.getElementById('include-fields').checked
+            };
+
+            try {
+                const response = await fetch('/api/build', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+                showResults('build-results', result.message || result.data, result.success);
+            } catch (error) {
+                showResults('build-results', 'Error: ' + error.message, false);
+            }
+        });
+
+        document.getElementById('check-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                path: document.getElementById('check-path').value,
+                verbose: document.getElementById('check-verbose').checked
+            };
+
+            try {
+                const response = await fetch('/api/check', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+                showResults('check-results', result.message || result.data, result.success);
+            } catch (error) {
+                showResults('check-results', 'Error: ' + error.message, false);
+            }
+        });
+
+        // Load formats on page load
+        loadFormats();
+    </script>
+</body>
+</html>
