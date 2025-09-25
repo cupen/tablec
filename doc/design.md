@@ -13,14 +13,22 @@ tablec 用于编译 Excel 等表格数据到其它数据格式, 如 json, msgpac
 * **Value** 表示数据值。
 
 # 表格设计
- Excel 表格就是 `Table`, 前 5 行作为保留行，用于声明 Schema, 其中前三行是字段信息，分别是（字段名，字段类型，注释），第 4 行为 Constraint
+ Excel 表格就是 `Table`, 前 5 行作为保留行，用于声明 Schema, 其中前 3 行是字段信息，分别是（字段名，字段类型，注释），第 4 行为 Constraint, 第 5 行暂时保留
+
+| 第1行     | 字段名    |
+| --------- | -------- |
+| 第2行     | 字段类型  |
+| 第3行     | 字段注释  |
+| 第4行     | Constrint |
+| 第5行     | 保留使用 |
+
 
 
 # 字段类型
 ## 基础类型
 string, int, uint, float, 其中按精度细分为：
 1. int => int8, int16, int32, int64  
-2. uint32 => uint8, uint16, uint32, uint64  
+2. uint => uint8, uint16, uint32, uint64  
 3. float => float32, float64  
 并且 string 可以简写为 str
 
@@ -31,11 +39,15 @@ array\<type\>
 其中 type 可以是任意`基础类型`，`数组类型`，或`结构体类型`
 
 ### 例子
+
 | 类型       | array<int>    | int[][]           | string[]          |
 | ---------- | ------------- | ----------------- | ----------------- |
 | 数值       | 1, 2, 3       | [1,2,3],[1,2,3]   | [hello, world]    |
 | 导出(Json) | [1, 2, 3]     | [[1,2,3],[1,2,3]] | ["hello","world"] |
-| ---------  | ------------- | ----------------- | ----------------- |
+
+
+| 类型       | array<int>    | int[][]           | string[]          |
+| ---------- | ------------- | ----------------- | ----------------- |
 | 数值       | [1, 2, 3]     | [[1,2,3],[1,2,3]] | [hello, world]    |
 | 导出(Json) | [1, 2, 3]     | [[1,2,3],[1,2,3]] | ["hello","world"] |
 
@@ -46,9 +58,9 @@ Map\<keyType, type\>
 表示键值对. 其中 keyType 只能是 int 或 string 类型, 而 type 则可以是`基础类型`, `数组类型`, `结构体类型`.
 
 ### 例子
-| 类型       | map<int, string>     | map<string, int[]>    |
-| ---------- | :--------------- | --------------------- |
-| 数值       | 1:2, 2:3        | a:[1,2], b:[2, 3]     |
+| 类型       | map<int, string>  | map<string, int[]>    |
+| ---------- | :---------------- | --------------------- |
+| 数值       | 1:2, 2:3          | a:[1,2], b:[2, 3]     |
 | 导出(Json) | {"1":"2","2":"3"} | {"1":[1,2],"2":[2,3]} |
 
 ## 结构体类型
@@ -62,9 +74,9 @@ struct{name1: type, name2:type ... }
 表示一个结构体，它包含名为 name1, name2 的多个字段，最多支持 32 个。 类型分别由 type 声明， 如果省略 type, 则默认为 string 类型
 
 ### 例子
-| 类型       | {a:int, b:str}  | struct{foo:str, bar: int[]} | struct{hello:str, world: int[]}[]                               |
-| ---------- | --------------- | --------------------------- | --------------------------------------------------------------- |
-| 数值       | {1, 2}          | {yes, [2,3]}                | {yes,[1,2,3]},{nonono, [4,5,6]}                                 |
+| 类型       | {a:int, b:str}  | struct{foo:str, bar: int[]} | struct{hello:str, world: int[]}[]                                  |
+| ---------- | --------------- | --------------------------- | ------------------------------------------------------------------ |
+| 数值       | {1, 2}          | {yes, [2,3]}                | {yes,[1,2,3]},{nonono, [4,5,6]}                                    |
 | 导出(Json) | {"a":1,"b":"2"} | {"foo":"yes", "bar": [2,3]} | [{"hello":"yes", "world":[1,2,3]},{"hello":"no","world":[4,5,6]} ] |
 
 
@@ -89,5 +101,24 @@ struct{name1: type, name2:type ... }
     * pybingding 基于 pyo3 和 maturin 实现,用于链接 rust 代码
 
 ## 数据结构
-1. tables
-
+1. project
+    ```rust
+    #[derive(Debug, Serialize)]
+    pub struct Project {
+        pub name: String,
+        pub version: String,
+        pub hash: int64,
+        pub buildAt: int64,
+        pub tables: Map<name, Table>,
+    }
+    ```
+2. table 
+    ```rust
+    #[derive(Debug, Serialize)]
+    pub struct Table {
+        pub name: String,
+        pub fields: Vec<field::Field>,
+        pub data: Vec<Row>,
+        pub constraints: Vec<constraint::Constraint>,
+    }
+    ```
