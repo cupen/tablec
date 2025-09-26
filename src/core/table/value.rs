@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use serde::ser::{Serialize, Serializer, SerializeMap};
 use std::cmp::Ordering;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone)]
@@ -114,6 +115,43 @@ impl PartialOrd for Value {
             (Value::Int(a), Value::Uint(b)) => (*a as i128).partial_cmp(&(*b as i128)),
             (Value::Uint(a), Value::Int(b)) => (*a as i128).partial_cmp(&(*b as i128)),
             _ => None, // Cannot compare other types
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(i) => write!(f, "{}", i),
+            Value::Uint(u) => write!(f, "{}", u),
+            Value::Float(fl) => write!(f, "{}", fl),
+            Value::String(s) => write!(f, "'{}'", s),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Array(arr) => {
+                write!(f, "[")?;
+                for (i, item) in arr.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "]")
+            }
+            Value::Map(map) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
+            Value::Struct(s) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in s.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
+            Value::Null => write!(f, "null"),
         }
     }
 }

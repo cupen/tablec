@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 - **Core**: Excel parsing and table schema validation (`src/core/`)
-- **CLI**: Three commands - build, check, and web server (`src/cmd/`)
+- **CLI**: Four commands - build, check, example, and web server (`src/cmd/`)
 - **Export**: JSON, MessagePack, and Protobuf formats (`src/export/`)
 - **Python**: Maturin-based bindings in `pybinding/` directory
 
@@ -21,6 +21,7 @@ cargo build --release                    # Build CLI
 target/release/tablec --help            # Run CLI help
 target/release/tablec build -i input.xlsx -o output.json
 target/release/tablec check path/to/files
+target/release/tablec example -o example.xlsx -r 10
 target/release/tablec web --listen 127.0.0.1:8080
 ```
 
@@ -38,6 +39,7 @@ pytest                                  # Run Python tests
 - **Excel parser**: Uses `calamine` crate for Excel parsing
 - **Table schema**: Defines constraints and validation rules
 - **Export formats**: JSON (default), MessagePack, Protobuf
+- **Example generator**: Creates sample Excel files with tablec format
 - **Web server**: Basic Actix-web server with hello endpoint
 - **Python API**: `build()` and `check()` functions exposed
 

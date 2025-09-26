@@ -8,7 +8,7 @@ use super::row::Row;
 use super::value::Value;
 use crate::core::parser::value_parser::parse_value as parse_value_from_str;
 
-use super::constraint;
+use super::constraint::{self, ConstraintValidator};
 
 #[derive(Debug, Serialize)]
 pub struct Table {
@@ -120,21 +120,33 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
             data.push(new_row);
         }
 
+        // Collect constraints from fields
+        let mut constraints = Vec::new();
+        for field in &fields {
+            if let Some(constraint) = &field.constraint {
+                constraints.push(constraint.clone());
+            }
+        }
+
         tables.push(Table {
             name: sheet_name.to_owned(),
             fields,
             data,
-            constraints: vec![], // Placeholder for now
+            constraints,
         });
     }
     Ok(tables)
 }
 
+impl Table {
+    pub fn validate_constraints(&self) -> Result<(), Vec<String>> {
+        ConstraintValidator::validate_table(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
     use crate::core::table::row::Row;
     use crate::core::table::value::Value;
 

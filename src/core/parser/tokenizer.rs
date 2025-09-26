@@ -10,7 +10,7 @@ pub struct Token<'a> {
     pub end: usize,
 }
 
-pub fn scan_tokens(s: &str) -> Vec<Token> {
+pub fn scan_tokens(s: &str) -> Vec<Token<'_>> {
     let mut tokens = Vec::new();
     let mut chars = s.char_indices().peekable();
 

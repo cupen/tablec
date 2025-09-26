@@ -25,4 +25,8 @@ impl Row {
         }
         row
     }
+
+    pub fn get_field(&self, field_name: &str) -> Option<&Value> {
+        self.fields.get(field_name)
+    }
 }

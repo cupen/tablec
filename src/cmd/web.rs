@@ -32,12 +32,6 @@ struct CheckRequest {
     verbose: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct CheckResponse {
-    files_checked: Vec<String>,
-    errors: Vec<String>,
-    total_errors: usize,
-}
 
 struct AppState {
 }

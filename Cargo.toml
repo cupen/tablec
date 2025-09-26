@@ -19,6 +19,8 @@ prost = "0.12.6"
 indexmap = { version = "2.10.0", features = ["serde"] }
 actix-web = "4.0"
 tempfile = "3.10.1"
+rand = "0.8.5"
+rust_xlsxwriter = "0.90.1"
 
 [build-dependencies]
 prost-build = "0.12.6"

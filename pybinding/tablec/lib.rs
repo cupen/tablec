@@ -30,6 +30,17 @@ impl Tablec {
         c.run().map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(())
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (output = "example.xlsx", rows = 10))]
+    fn example(output: &str, rows: usize) -> PyResult<()> {
+        let c = tablec_mod::cmd::example::ExampleCommand {
+            output: output.to_string(),
+            rows,
+        };
+        c.run().map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[pymodule]

@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 pub use crate::cmd::build::BuildCommand;
 pub use crate::cmd::check::CheckCommand;
 pub use crate::cmd::web::WebCommand;
+pub use crate::cmd::example::ExampleCommand;
 
 #[derive(Debug, Parser)]
 #[command(name = "tablec", about = "table compiler for build data from Excel files")]
@@ -22,6 +23,8 @@ pub enum Command {
     Check(CheckCommand),
     /// Start a web server
     Web(WebCommand),
+    /// Create an example Excel file
+    Example(ExampleCommand),
 }
 
 pub fn parse_args() -> Args {

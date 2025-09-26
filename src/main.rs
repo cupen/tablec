@@ -17,5 +17,9 @@ async fn main() -> std::io::Result<()> {
         Command::Web(c) => {
             c.run().await
         }
+        Command::Example(c) => {
+            c.run().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            Ok(())
+        }
     }
 }
