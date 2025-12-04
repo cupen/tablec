@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.9.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "tablec-python"
+version = "0.1.0"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "openpyxl>=3.1.5",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "tablec._native"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.4.1",
+    "openpyxl>=3.1.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
