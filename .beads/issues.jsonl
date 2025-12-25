@@ -1,0 +1,1 @@
+{"id":"tablec-9ui","title":"增加 cli 命令 export ","description":"用于导出 table 到其他数据格式，使用 --json  / --csv  / --msgpack  分别导出 json / csv / messagepack 到指定文件。","status":"open","priority":2,"issue_type":"feature","created_at":"2025-12-25T15:07:23.631547504+08:00","updated_at":"2025-12-25T15:17:57.545437824+08:00"}
