@@ -1,0 +1,280 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: Linux
+            runs_on: ubuntu-latest
+            archive_name: tablec-linux-x86_64.tar.gz
+            binary_name: tablec
+
+          - target: aarch64-unknown-linux-gnu
+            os: Linux
+            runs_on: ubuntu-latest
+            archive_name: tablec-linux-aarch64.tar.gz
+            binary_name: tablec
+
+          - target: x86_64-pc-windows-msvc
+            os: Windows
+            runs_on: windows-latest
+            archive_name: tablec-windows-x86_64.zip
+            binary_name: tablec.exe
+
+          - target: aarch64-pc-windows-msvc
+            os: Windows
+            runs_on: windows-latest
+            archive_name: tablec-windows-aarch64.zip
+            binary_name: tablec.exe
+
+          - target: x86_64-apple-darwin
+            os: macOS
+            runs_on: macos-latest
+            archive_name: tablec-macos-x86_64.tar.gz
+            binary_name: tablec
+
+          - target: aarch64-apple-darwin
+            os: macOS
+            runs_on: macos-latest
+            archive_name: tablec-macos-aarch64.tar.gz
+            binary_name: tablec
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Install cross-compilation tools (Linux)
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: |
+          if [ "${{ runner.os }}" == "Linux" ] && [ "${{ matrix.target }}" != "x86_64-unknown-linux-gnu" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Prepare archive
+        run: |
+          mkdir -p artifacts
+
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} artifacts/
+            cd artifacts
+            7z a ../${{ matrix.archive_name }} ${{ matrix.binary_name }}
+          else
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} artifacts/
+            cd artifacts
+            tar czf ../${{ matrix.archive_name }} ${{ matrix.binary_name }}
+          fi
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## 📦 Tablec Binary Release
+
+          Tablec is a Rust-based table compiler for gamedev that processes Excel/CSV/JSON files into structured data formats.
+
+          ### 🚀 Installation
+
+          #### Linux
+          ```bash
+          # x86_64
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/tablec-linux-x86_64.tar.gz
+          tar xzf tablec-linux-x86_64.tar.gz
+          sudo mv tablec /usr/local/bin/
+
+          # ARM64
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/tablec-linux-aarch64.tar.gz
+          tar xzf tablec-linux-aarch64.tar.gz
+          sudo mv tablec /usr/local/bin/
+          ```
+
+          #### macOS
+          ```bash
+          # Intel
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/tablec-macos-x86_64.tar.gz
+          tar xzf tablec-macos-x86_64.tar.gz
+          sudo mv tablec /usr/local/bin/
+
+          # Apple Silicon (M1/M2/M3)
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/tablec-macos-aarch64.tar.gz
+          tar xzf tablec-macos-aarch64.tar.gz
+          sudo mv tablec /usr/local/bin/
+          ```
+
+          #### Windows
+          Download and extract the appropriate zip file from the assets below.
+
+          ### 📚 Usage
+
+          ```bash
+          tablec --help
+          tablec build -i input.xlsx -o output.json
+          tablec check path/to/files
+          tablec example -o example.xlsx -r 10
+          tablec web --listen 127.0.0.1:8080
+          ```
+
+          ### 🔗 Documentation
+
+          For more information, visit the [GitHub repository](https://github.com/${{ github.repository }}).
+          EOF
+          cat release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' }}
+          files: artifacts/*/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ci:
+    name: CI - Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all --verbose
+
+      - name: Build
+        run: cargo build --release --all
