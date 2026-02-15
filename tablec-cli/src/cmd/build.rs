@@ -33,9 +33,6 @@ impl BuildCommand {
                     export::msgpack::export(&table, &self.output)?;
                 }
             }
-            "protobuf" => {
-                export::protobuf::export(&tables, &self.output)?;
-            }
             _ => {
                 return Err(format!("Unsupported format '{}'.", self.format).into());
             }

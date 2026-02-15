@@ -4,5 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Meta {
     pub version: String,
     pub build_at: i64,
-    pub hash: String,
+    pub hash: i64,
+    pub build_time: String,
+    pub source_hash: String,
 }
