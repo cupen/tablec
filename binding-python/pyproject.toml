@@ -18,6 +18,7 @@ dependencies = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "tablec._native"
+python-source = "tablec"
 
 [tool.uv]
 dev-dependencies = [

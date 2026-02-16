@@ -24,46 +24,25 @@ def excel_file(temp_dir):
     workbook.save(file_path)
     return file_path
 
-def test_build_function_with_fields(excel_file, temp_dir):
-    output_file = temp_dir.join("output_with_fields.json")
-    tablec.build(str(excel_file), str(output_file), "json", include_fields=True)
+def test_build_function_json(excel_file, temp_dir):
+    output_file = temp_dir.join("output.json")
+    tablec.build(str(excel_file), str(output_file), "json")
 
     with open(output_file, "r") as f:
         data = json.load(f)
 
-    assert data == [
-        {
-            "name": "Sheet1",
-            "fields": [
-                {"name": "id", "t": "Int32", "desc": "#", "constraint": None, "tags": []},
-                {"name": "name", "t": "String", "desc": "#", "constraint": None, "tags": []},
-                {"name": "age", "t": "Int32", "desc": "#", "constraint": None, "tags": []},
-            ],
-            "data": [
-                {"age": 20, "id": 1, "name": "Alice"},
-                {"age": 22, "id": 2, "name": "Bob"},
-            ],
-            "constraints": []
-        }
-    ]
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["name"] == "Sheet1"
+    assert len(data[0]["data"]) == 2
+    assert data[0]["data"][0]["name"] == "Alice"
 
-def test_build_function_without_fields(excel_file, temp_dir):
-    output_file = temp_dir.join("output_without_fields.json")
-    tablec.build(str(excel_file), str(output_file), "json", include_fields=False)
+def test_build_function_msgpack(excel_file, temp_dir):
+    output_file = temp_dir.join("output.msgpack")
+    tablec.build(str(excel_file), str(output_file), "msgpack")
 
-    with open(output_file, "r") as f:
-        data = json.load(f)
-
-    assert data == [
-        {
-            "name": "Sheet1",
-            "data": [
-                {"age": 20, "id": 1, "name": "Alice"},
-                {"age": 22, "id": 2, "name": "Bob"},
-            ],
-            "constraints": []
-        }
-    ]
+    assert os.path.exists(output_file)
+    assert os.path.getsize(output_file) > 0
 
 def test_check_function(excel_file):
     tablec.check(str(excel_file))

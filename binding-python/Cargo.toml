@@ -9,4 +9,4 @@ path = "src/lib.rs"
 
 [dependencies]
 tablec-core = { path = "../tablec-core" }
-pyo3 = { version = "0.27.2" }
+pyo3 = { version = "0.27.2", features = ["abi3-py310", "abi3-py311", "abi3-py312", "abi3-py313"] }
