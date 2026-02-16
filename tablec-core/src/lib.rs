@@ -5,4 +5,5 @@ pub mod export;
 pub use core::table::*;
 pub use core::parser::*;
 pub use core::plugin::*;
+pub use core::project::*;
 pub use export::*;

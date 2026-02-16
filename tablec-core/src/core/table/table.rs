@@ -1,5 +1,5 @@
 use calamine::{open_workbook_auto, Reader, Data};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::str::FromStr;
 
@@ -10,7 +10,7 @@ use crate::core::parser::value_parser::parse_value as parse_value_from_str;
 
 use super::constraint::{self, ConstraintValidator};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     pub name: String,
     pub fields: Vec<field::Field>,

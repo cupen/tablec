@@ -1,9 +1,9 @@
 use indexmap::IndexMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 use super::value::Value;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row {
     #[serde(flatten)]
     pub fields: IndexMap<String, Value>,
