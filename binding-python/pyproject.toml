@@ -18,15 +18,11 @@ dependencies = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "tablec._native"
-python-source = "tablec"
+python-source = "."
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.4.1",
-    "openpyxl>=3.1.5",
-]
 
 [dependency-groups]
 dev = [
     "pytest>=8.4.1",
+    "openpyxl>=3.1.5",
 ]

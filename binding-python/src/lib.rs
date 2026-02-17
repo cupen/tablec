@@ -43,7 +43,7 @@ fn check(input: &str) -> PyResult<()> {
 
 
 #[pymodule]
-fn tablec(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(check, m)?)?;
     Ok(())

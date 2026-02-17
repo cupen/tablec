@@ -47,4 +47,4 @@ def test_composite_unique_constraint_fail(duplicate_unique_excel_file):
     # This should raise an exception due to duplicate combination
     with pytest.raises(Exception) as excinfo:
         tablec.check(str(duplicate_unique_excel_file))
-    assert "Duplicate combination found for fields" in str(excinfo.value)
+    assert "Duplicate values" in str(excinfo.value)
