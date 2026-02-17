@@ -13,6 +13,7 @@ A **Table Compiler** for game development - compiles Excel/CSV/JSON table data i
 
 ## Installation
 
+
 Requires Rust 1.60+:
 
 ```bash

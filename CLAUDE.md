@@ -28,7 +28,7 @@ target/release/tablec web --listen 127.0.0.1:8080
 ### Python Bindings
 python 开发环境可以用 uv 创建 venv
 ```bash
-cd pybinding
+cd binding-python
 maturin develop                         # Build Python bindings
 python -c "import tablec; tablec.check('file.xlsx')"
 pytest                                  # Run Python tests
