@@ -5,3 +5,7 @@ members = [
     "tablec-cli",
     "binding-python",
 ]
+default-members = [
+    "tablec-core",
+    "tablec-cli",
+]

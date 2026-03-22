@@ -12,3 +12,4 @@ rust_xlsxwriter = "0.90.1"
 calamine = "0.25.0"
 tokio = { version = "1", features = ["full"] }
 rand = "0.9.2"
+glob = "0.3"

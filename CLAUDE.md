@@ -56,3 +56,9 @@ pytest                                  # Run Python tests
 - `src/export/` - Format-specific exporters
 - `pybinding/` - Python extension module
 - `proto/` - Protocol buffer definitions
+
+## 开发进度管理
+使用 beads 
+- bd list                   # 查看当前任务
+- bd create --title {标题} --description {详细描述}  # 创建任务
+

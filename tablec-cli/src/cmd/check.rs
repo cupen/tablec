@@ -1,10 +1,15 @@
 use clap::Args;
 use std::error::Error;
 use std::path::PathBuf;
+use tablec_core::core::config::{self, Config};
 use tablec_core::core::table::{table::read_excel, validator::validate_table};
 
 #[derive(Args, Debug)]
 pub struct CheckCommand {
+    /// Config file path (default: tablec.toml in current directory)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
     #[arg(short, long)]
     pub verbose: bool,
 
@@ -22,20 +27,35 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
     println!("Checking tables...");
 
     let mut excel_files = Vec::new();
-    let path = c.path.unwrap_or_else(|| PathBuf::from("."));
+
+    // Try to load config
+    let config = Config::load(c.config.as_deref())?;
+
+    let path = if let Some(p) = c.path {
+        // CLI path takes precedence
+        PathBuf::from(p)
+    } else if let Some(ref cfg) = config {
+        // Use config's input_dir
+        PathBuf::from(&cfg.data.input_dir)
+    } else {
+        // Default to current directory
+        PathBuf::from(".")
+    };
 
     if path.is_dir() {
-        for entry in std::fs::read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "xlsx" || ext == "xls" {
-                        excel_files.push(path);
-                    }
-                }
-            }
-        }
+        // Get include/exclude patterns from config if available
+        let include = config.as_ref()
+            .and_then(|c| c.data.include.clone())
+            .unwrap_or_else(|| vec!["*.xlsx".to_string()]);
+        let exclude = config.as_ref()
+            .and_then(|c| c.data.exclude.clone())
+            .unwrap_or_default();
+
+        excel_files = config::find_excel_files(
+            &path.to_string_lossy(),
+            &include,
+            &exclude
+        )?;
     } else if path.is_file() {
         excel_files.push(path);
     }

@@ -11,8 +11,11 @@ pub struct ExampleCommand {
     #[arg(short, long, default_value_t = 10, help = "number of data rows to generate")]
     pub rows: usize,
 
-    #[arg(short, long, default_value_t = false, help = "whether to overwrite existing files")]
+    #[arg(short = 'f', long, default_value_t = false, help = "whether to overwrite existing files")]
     pub force: bool,
+
+    #[arg(long, default_value_t = false, help = "use random data instead of sequential (default is sequential)")]
+    pub rand: bool,
 }
 
 impl ExampleCommand {
@@ -54,25 +57,28 @@ impl ExampleCommand {
             .set_background_color(Color::RGB(0xF0F0F0)) // 浅灰色
             .set_border(FormatBorder::Thin);
 
-        // 表头定义 - 符合 tablec 格式
+        // 表头定义 - 符合 tablec 格式，覆盖所有类型
         let field_names = vec![
-            "id", "name", "age", "score", "active", "tags", "created_at"
+            "id", "name", "age", "score", "active", "tags", "meta",
+            "numbers", "mapping", "nested",
         ];
 
         let field_types = vec![
-            "int32", "string", "int32", "float64", "bool", "string[]", "string"
+            "int32", "string", "int16", "float64", "bool", "string[]", "{a:int,b:str}",
+            "int[][]", "map<string,int>", "{x:int,y:float}[]",
         ];
 
         let field_comments = vec![
-            "用户ID", "用户名", "年龄", "分数", "是否激活", "标签列表", "创建时间"
+            "主键", "名称", "年龄", "分数", "是否激活", "标签", "元数据结构体",
+            "二维整数数组", "字符串到整数的映射", "浮点结构体数组",
         ];
 
         let constraints = vec![
-            "@unique", "", "", "", "", "", ""
+            "@unique", "", "", "", "", "", "", "", "", "",
         ];
 
         let reserved = vec![
-            "", "", "", "", "", "", ""
+            "", "", "", "", "", "", "", "", "", "",
         ];
 
         // 写入表头 - 前5行
@@ -101,39 +107,86 @@ impl ExampleCommand {
             worksheet.write_string_with_format(4, col as u16, *reserved_text, &reserved_format)?;
         }
 
-        // 生成随机数据 - 从第6行开始
+        // 生成数据 - 从第6行开始
         let mut rnd = rand::rng();
 
         for row in 0..self.rows {
             let row_idx = row as u32 + 5; // 从第6行开始
+            let i = row + 1; // 1-based index
 
-            // id
-            worksheet.write_number(row_idx, 0, (row + 1) as f64)?;
+            // id (int32)
+            worksheet.write_number(row_idx, 0, i as f64)?;
 
-            // name
-            worksheet.write_string(row_idx, 1, &format!("User {}", row + 1))?;
+            // name (string)
+            worksheet.write_string(row_idx, 1, &format!("User {}", i))?;
 
-            // age
-            worksheet.write_number(row_idx, 2, rnd.random_range(18..65) as f64)?;
+            // age (int16) - 固定: 18+i, 随机: 18..65
+            let age: i32 = if self.rand {
+                rnd.random_range(18..65)
+            } else {
+                18 + i as i32
+            };
+            worksheet.write_number(row_idx, 2, age as f64)?;
 
-            // score
-            worksheet.write_number(row_idx, 3, rnd.random_range(60.0..100.0))?;
+            // score (float64) - 固定: 60.0+i, 随机: 60.0..100.0
+            let score: f64 = if self.rand {
+                rnd.random_range(60.0..100.0)
+            } else {
+                60.0 + i as f64
+            };
+            worksheet.write_number(row_idx, 3, score)?;
 
-            // active
-            worksheet.write_string(row_idx, 4, if rnd.random_bool(0.5) { "true" } else { "false" })?;
+            // active (bool)
+            let active: bool = if self.rand {
+                rnd.random_bool(0.5)
+            } else {
+                i % 2 == 1
+            };
+            worksheet.write_string(row_idx, 4, if active { "true" } else { "false" })?;
 
-            // tags - 数组格式需要用方括号
-            worksheet.write_string(row_idx, 5, &format!("[tag{},tag{}]", rnd.random_range(1..4), rnd.random_range(1..4)))?;
+            // tags (string[]) - 固定: [tag1,tag2], 随机: [tag?,tag?]
+            let tag1 = if self.rand { rnd.random_range(1..5) } else { 1 };
+            let tag2 = if self.rand { rnd.random_range(1..5) } else { 2.min(i as i32) };
+            worksheet.write_string(row_idx, 5, &format!("[tag{},tag{}]", tag1, tag2))?;
 
-            // created_at
-            worksheet.write_string(row_idx, 6, &format!("2024-{:02}-{:02}", rnd.random_range(1..13), rnd.random_range(1..29)))?;
+            // meta ({a:int,b:str}) - 固定: {i,str_i}, 随机: {?,?}
+            let meta_a: i32 = if self.rand { rnd.random_range(1..100) } else { i as i32 };
+            let meta_b = if self.rand { format!("str{}", rnd.random_range(1..10)) } else { format!("str_{}", i) };
+            worksheet.write_string(row_idx, 6, &format!("{{{}}}", format!("{},{}", meta_a, meta_b)))?;
+
+            // numbers (int[][]) - 固定: [[i,i+1],[i+2,i+3]], 随机: random
+            let nums = if self.rand {
+                format!("[[{},{}],[{},{}]]",
+                    rnd.random_range(1..10), rnd.random_range(1..10),
+                    rnd.random_range(1..10), rnd.random_range(1..10))
+            } else {
+                format!("[[{},{}],[{},{}]]", i, i+1, i+2, i+3)
+            };
+            worksheet.write_string(row_idx, 7, &nums)?;
+
+            // mapping (map<string,int>) - 格式: k1:1, k2:2
+            let map_val1: i32 = if self.rand { rnd.random_range(1..50) } else { i as i32 };
+            let map_val2: i32 = if self.rand { rnd.random_range(1..50) } else { (i as i32) * 2 };
+            worksheet.write_string(row_idx, 8, &format!("k1:{},k2:{}", map_val1, map_val2))?;
+
+            // nested ({x:int,y:float}[]) - 固定: [{i,float_i},..], 随机
+            let nested = if self.rand {
+                format!("[{{{},{}}},{{{},{}}}]",
+                    rnd.random_range(1..20), rnd.random_range(1.0..10.0),
+                    rnd.random_range(1..20), rnd.random_range(1.0..10.0))
+            } else {
+                format!("[{{{},{:.1}}},{{{},{:.1}}}]", i, i as f64, i+10, (i+10) as f64)
+            };
+            worksheet.write_string(row_idx, 9, &nested)?;
         }
 
         // 保存 Excel 文件
         workbook.save(&self.output)?;
 
+        let mode = if self.rand { "random" } else { "sequential" };
         println!("Created example Excel file: {}", self.output);
-        println!("Generated {} rows with basic data types", self.rows);
+        println!("Generated {} rows with {} data", self.rows, mode);
+        println!("Column types: int32, string, int16, float64, bool, string[], {{a:int,b:str}}, int[][], map<string,int>, {{x:int,y:float}}[]");
         println!("Table header format: field_name | field_type | field_comment | constraint | reserved");
 
         Ok(())

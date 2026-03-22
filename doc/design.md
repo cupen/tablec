@@ -1,6 +1,6 @@
 # 设计文档
 ## 简介
-tablec 意为 **Table** **C**ompiler, 用于编译 Excel 等表格数据到程序易读的数据格式, 如 json, msgpack 或 protobuf
+tablec 意为 **Table** **C**ompiler, 用于编译 Excel 等表格数据到程序易读的数据格式, 如 json, msgpack
 
 ## 名词
 | 名词            | 含义  | 用途                         |
@@ -111,10 +111,15 @@ or
     #[derive(Debug, Serialize)]
     pub struct Project {
         pub name: String,
-        pub version: String,
-        pub hash: int64,
-        pub buildAt: int64,
+        pub meta: Meta,
         pub tables: Map<name, Table>,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct Meta {
+        pub version: String,
+        pub hash: i64,
+        pub build_at: i64,
     }
     ```
 2. table 
