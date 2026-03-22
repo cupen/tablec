@@ -1,6 +1,6 @@
 # 设计文档
 ## 简介
-tablec 意为 **Table** **C**ompiler, 用于编译 Excel 等表格数据到程序易读的数据格式, 如 json, msgpack 或 protobuf
+tablec 意为 **Table** **C**ompiler, 用于编译 Excel 等表格数据到程序易读的数据格式, 如 json, msgpack
 
 ## 名词
 | 名词            | 含义  | 用途                         |
