@@ -118,21 +118,26 @@ fn validate_seq(values: &[&Value], args: &[String]) -> Result<(), String> {
         if value == &&Value::Null {
             continue;
         }
-        match value {
-            Value::Int(v) => {
-                if *v != expected {
-                    return Err(format!("Sequence mismatch at index {}: expected {}, found {}", i, expected, v));
-                }
-                expected += step;
-            }
-            Value::Uint(v) => {
-                if *v != expected as u64 {
-                    return Err(format!("Sequence mismatch at index {}: expected {}, found {}", i, expected, v));
-                }
-                expected += step;
-            }
-            _ => return Err("Sequence validation can only be applied to integer types".to_string()),
+        let n = numeric_i64(value).ok_or_else(|| "Sequence validation can only be applied to integer types".to_string())?;
+        if n != expected {
+            return Err(format!("Sequence mismatch at index {}: expected {}, found {}", i, expected, n));
         }
+        expected += step;
     }
     Ok(())
+}
+
+fn numeric_i64(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int8(n)  => Some(*n as i64),
+        Value::Int16(n) => Some(*n as i64),
+        Value::Int32(n) => Some(*n as i64),
+        Value::Int64(n) => Some(*n),
+        Value::Uint8(n)  => Some(*n as i64),
+        Value::Uint16(n) => Some(*n as i64),
+        Value::Uint32(n) if *n <= i64::MAX as u32 => Some(*n as i64),
+        Value::Uint64(n) if *n <= i64::MAX as u64 => Some(*n as i64),
+        Value::Uint32(_) | Value::Uint64(_) => None,
+        _ => None,
+    }
 }

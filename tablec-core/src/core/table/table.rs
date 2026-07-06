@@ -5,8 +5,8 @@ use std::str::FromStr;
 
 use super::field::{self, FieldType};
 use super::row::Row;
-use super::value::Value;
-use crate::core::parser::value_parser::parse_value as parse_value_from_str;
+use crate::core::diagnostic::SourceLocation;
+use crate::core::parser::value_parser::parse_value;
 
 use super::constraint::{self, ConstraintValidator};
 
@@ -16,6 +16,11 @@ pub struct Table {
     pub fields: Vec<field::Field>,
     pub data: Vec<Row>,
     pub constraints: Vec<constraint::Constraint>,
+}
+
+fn diag_to_box(e: crate::core::diagnostic::Diagnostic) -> Box<dyn Error> {
+    let s: String = e.to_string();
+    Box::<dyn Error>::from(s)
 }
 
 pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
@@ -109,11 +114,13 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "".to_string());
 
-                let value = parse_value_from_str(&cell_value_str, &field.t.to_type())
-                    .unwrap_or_else(|e| {
-                        eprintln!("Failed to parse value '{}' for field '{}' at row {}: {}. Defaulting to Null.", cell_value_str, field.name, row_index + 5, e);
-                        Value::Null
-                    });
+                let cell_loc = SourceLocation {
+                    file: Some(std::path::PathBuf::from(fpath)),
+                    sheet: Some(sheet_name.clone()),
+                    line: Some(row_index as u32 + 5),  // row 1-4 reserved, data starts at row 5
+                    column: Some(col_index as u32 + 1),
+                };
+                let value = parse_value(&cell_value_str, &field.t, cell_loc).map_err(diag_to_box)?;
 
                 new_row.add_field(field.name.clone(), value);
             }
@@ -149,6 +156,7 @@ mod tests {
     use super::*;
     use crate::core::table::row::Row;
     use crate::core::table::value::Value;
+    use crate::export::Format;
 
     #[test]
     fn test_read_excel_basic() {
@@ -180,11 +188,11 @@ mod tests {
             ],
             data: vec![
                 Row::from_vec(vec![
-                    ("ID".to_string(), Value::Int(1)),
+                    ("ID".to_string(), Value::Int32(1)),
                     ("Name".to_string(), Value::String("Alice".to_string())),
                 ]),
                 Row::from_vec(vec![
-                    ("ID".to_string(), Value::Int(2)),
+                    ("ID".to_string(), Value::Int32(2)),
                     ("Name".to_string(), Value::String("Bob".to_string())),
                 ]),
             ],
@@ -193,12 +201,20 @@ mod tests {
 
         // 测试JSON导出
         let tables = vec![table];
-        let result = crate::export::json::to_string(&tables, true);
+        let project = crate::core::project::project::Project::from_tables("test_project".to_string(), tables);
+        let json = crate::export::Json { pretty: false, include_fields: true };
+        let result = json.to_vec(&project);
         assert!(result.is_ok(), "JSON export failed: {:?}", result.err());
 
-        let json_str = result.unwrap();
+        let json_str = String::from_utf8(result.unwrap()).unwrap();
         assert!(json_str.contains("test_table"), "JSON should contain table name");
         assert!(json_str.contains("Alice"), "JSON should contain data");
         assert!(json_str.contains("fields"), "JSON should contain fields when include_fields=true");
+    }
+
+    #[test]
+    fn out_of_range_cell_yields_clear_error() {
+        // Generate an in-memory workbook-like construction? Tests of read_excel
+        // require real .xlsx files; defer detailed xlsx tests to error_cases fixtures (c4).
     }
 }

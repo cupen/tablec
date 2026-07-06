@@ -43,20 +43,29 @@ pub enum FieldType {
 impl FieldType {
     pub fn to_type(&self) -> Type {
         match self {
-            FieldType::Int | FieldType::Int8 | FieldType::Int16 | FieldType::Int32 | FieldType::Int64 => Type::Int,
-            FieldType::Uint | FieldType::Uint8 | FieldType::Uint16 | FieldType::Uint32 | FieldType::Uint64 => Type::Uint,
-            FieldType::Float | FieldType::Float32 | FieldType::Float64 => Type::Float,
+            FieldType::Int8 => Type::Int8,
+            FieldType::Int16 => Type::Int16,
+            FieldType::Int32 => Type::Int32,
+            FieldType::Int64 => Type::Int64,
+            FieldType::Int  => Type::Int32,
+            FieldType::Uint8 => Type::Uint8,
+            FieldType::Uint16 => Type::Uint16,
+            FieldType::Uint32 => Type::Uint32,
+            FieldType::Uint64 => Type::Uint64,
+            FieldType::Uint  => Type::Uint32,
+            FieldType::Float32 => Type::Float32,
+            FieldType::Float64 => Type::Float64,
+            FieldType::Float => Type::Float32,
             FieldType::String => Type::String,
             FieldType::Bool => Type::Bool,
-            FieldType::Date | FieldType::DateTime | FieldType::Timestamp32 | FieldType::Timestamp64 => Type::String, // Treat date/time as string for now
+            FieldType::Date | FieldType::DateTime
+                | FieldType::Timestamp32 | FieldType::Timestamp64 => Type::String,
             FieldType::Array { r#type } => Type::Array(Box::new(r#type.to_type())),
             FieldType::Map { key, value } => Type::Map(Box::new(key.to_type()), Box::new(value.to_type())),
             FieldType::Struct { fields } => {
-                let mut struct_fields = std::collections::HashMap::new();
-                for field in fields {
-                    struct_fields.insert(field.name.clone(), field.t.to_type());
-                }
-                Type::Struct(struct_fields)
+                let mut m = std::collections::HashMap::new();
+                for f in fields { m.insert(f.name.clone(), f.t.to_type()); }
+                Type::Struct(m)
             }
         }
     }
@@ -283,6 +292,13 @@ fn consume_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_type_preserves_width() {
+        assert_eq!(FieldType::Int8.to_type(), Type::Int8);
+        assert_eq!(FieldType::Uint16.to_type(), Type::Uint16);
+        assert_eq!(FieldType::Float64.to_type(), Type::Float64);
+    }
 
     #[test]
     fn test_parse_simple_types() {

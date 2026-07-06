@@ -1,21 +1,35 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use pyo3::Bound;
+use tablec_core::core::project::meta::Meta;
+use tablec_core::core::project::project::Project;
 use tablec_core::core::table::table::read_excel;
-use tablec_core::export;
+use tablec_core::export::{Format, Json, Msgpack};
 
 #[pyfunction]
 fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
     let tables = read_excel(input).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
+    let project = Project {
+        name: std::path::Path::new(input)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("untitled")
+            .to_string(),
+        meta: Meta { version: "0.0.0".to_string(), hash: 0, build_at: 0 },
+        tables: tables.into_iter().map(|t| (t.name.clone(), t)).collect(),
+    };
+
     match format {
         "json" => {
-            let json_data = export::json::to_string(&tables, false).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, json_data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let json = Json { pretty: true, include_fields: false };
+            let bytes = json.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         }
         "msgpack" => {
-            let msgpack_data = export::msgpack::to_vec(&tables).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, msgpack_data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let msgpack = Msgpack;
+            let bytes = msgpack.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         }
         _ => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!("Unsupported format '{}'", format)));

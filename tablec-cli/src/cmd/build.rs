@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tablec_core::core::config::{self, Config};
 use tablec_core::core::table::table::read_excel;
 use tablec_core::core::project::project::Project;
-use tablec_core::export::{self, Format, Json, Msgpack};
+use tablec_core::export::{Format, Json, Msgpack};
 
 #[derive(Args, Debug)]
 pub struct BuildCommand {
@@ -166,9 +166,12 @@ impl BuildCommand {
 // This function is for the python library, returning the JSON as a string.
 pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> Result<String, Box<dyn Error>> {
     let tables = read_excel(input_path)?;
+    let project = Project::from_tables("unnamed".to_string(), tables);
     match format {
         "json" => {
-            export::json::to_string(&tables, include_fields)
+            let json = Json { pretty: true, include_fields };
+            let bytes = json.to_vec(&project)?;
+            Ok(String::from_utf8(bytes)?)
         }
         // Other formats could be added here if needed.
         _ => Err(format!("Unsupported format '{}'.", format).into()),

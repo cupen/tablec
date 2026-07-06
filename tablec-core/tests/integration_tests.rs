@@ -38,19 +38,19 @@ fn build_multi_table_project() -> Project {
             ],
             data: vec![
                 Row::from_vec(vec![
-                    ("id".to_string(), Value::Int(1001)),
+                    ("id".to_string(), Value::Int32(1001)),
                     ("name".to_string(), Value::String("Sword".to_string())),
-                    ("price".to_string(), Value::Float(5.0)),
+                    ("price".to_string(), Value::Float32(5.0)),
                 ]),
                 Row::from_vec(vec![
-                    ("id".to_string(), Value::Int(1002)),
+                    ("id".to_string(), Value::Int32(1002)),
                     ("name".to_string(), Value::String("Shield".to_string())),
-                    ("price".to_string(), Value::Float(10.0)),
+                    ("price".to_string(), Value::Float32(10.0)),
                 ]),
                 Row::from_vec(vec![
-                    ("id".to_string(), Value::Int(1003)),
+                    ("id".to_string(), Value::Int32(1003)),
                     ("name".to_string(), Value::String("Potion".to_string())),
-                    ("price".to_string(), Value::Float(25.0)),
+                    ("price".to_string(), Value::Float32(25.0)),
                 ]),
             ],
             constraints: vec![],
@@ -73,16 +73,16 @@ fn build_multi_table_project() -> Project {
             ],
             data: vec![
                 Row::from_vec(vec![
-                    ("level".to_string(), Value::Int(1)),
-                    ("exp".to_string(), Value::Int(100)),
+                    ("level".to_string(), Value::Int32(1)),
+                    ("exp".to_string(), Value::Int32(100)),
                 ]),
                 Row::from_vec(vec![
-                    ("level".to_string(), Value::Int(2)),
-                    ("exp".to_string(), Value::Int(250)),
+                    ("level".to_string(), Value::Int32(2)),
+                    ("exp".to_string(), Value::Int32(250)),
                 ]),
                 Row::from_vec(vec![
-                    ("level".to_string(), Value::Int(3)),
-                    ("exp".to_string(), Value::Int(500)),
+                    ("level".to_string(), Value::Int32(3)),
+                    ("exp".to_string(), Value::Int32(500)),
                 ]),
             ],
             constraints: vec![],
@@ -174,8 +174,8 @@ fn test_full_pipeline_constraint_violation_caught() {
                 },
             ],
             data: vec![
-                Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-                Row::from_vec(vec![("id".to_string(), Value::Int(1))]), // duplicate!
+                Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+                Row::from_vec(vec![("id".to_string(), Value::Int32(1))]), // duplicate!
             ],
             constraints: vec![],
         },
@@ -200,7 +200,7 @@ fn test_project_from_tables() {
             name: "id".to_string(), t: FieldType::Int32,
             desc: "".to_string(), constraint: None, tags: vec![],
         }],
-        data: vec![Row::from_vec(vec![("id".to_string(), Value::Int(1))])],
+        data: vec![Row::from_vec(vec![("id".to_string(), Value::Int32(1))])],
         constraints: vec![],
     }];
 
@@ -259,22 +259,20 @@ fn test_excel_read_nonexistent_file() {
     assert!(result.is_err());
 }
 
-// === FieldType to_type conversion ===
+// === FieldType to_type conversion (c3: width-preserving) ===
 
 #[test]
 fn test_fieldtype_to_type_basics() {
     use tablec_core::core::table::types::Type;
 
-    assert_eq!(FieldType::Int.to_type(), Type::Int);
-    assert_eq!(FieldType::Int8.to_type(), Type::Int);
-    assert_eq!(FieldType::Int16.to_type(), Type::Int);
-    assert_eq!(FieldType::Int32.to_type(), Type::Int);
-    assert_eq!(FieldType::Int64.to_type(), Type::Int);
-    assert_eq!(FieldType::Uint.to_type(), Type::Uint);
-    assert_eq!(FieldType::Uint8.to_type(), Type::Uint);
-    assert_eq!(FieldType::Float.to_type(), Type::Float);
-    assert_eq!(FieldType::Float32.to_type(), Type::Float);
-    assert_eq!(FieldType::Float64.to_type(), Type::Float);
+    assert_eq!(FieldType::Int8.to_type(), Type::Int8);
+    assert_eq!(FieldType::Int16.to_type(), Type::Int16);
+    assert_eq!(FieldType::Int32.to_type(), Type::Int32);
+    assert_eq!(FieldType::Int64.to_type(), Type::Int64);
+    assert_eq!(FieldType::Uint8.to_type(), Type::Uint8);
+    assert_eq!(FieldType::Uint32.to_type(), Type::Uint32);
+    assert_eq!(FieldType::Float32.to_type(), Type::Float32);
+    assert_eq!(FieldType::Float64.to_type(), Type::Float64);
     assert_eq!(FieldType::String.to_type(), Type::String);
     assert_eq!(FieldType::Bool.to_type(), Type::Bool);
 }
@@ -284,7 +282,7 @@ fn test_fieldtype_to_type_array() {
     use tablec_core::core::table::types::Type;
 
     let ft = FieldType::Array { r#type: Box::new(FieldType::Int32) };
-    assert_eq!(ft.to_type(), Type::Array(Box::new(Type::Int)));
+    assert_eq!(ft.to_type(), Type::Array(Box::new(Type::Int32)));
 
     let ft = FieldType::Array { r#type: Box::new(FieldType::Array { r#type: Box::new(FieldType::String) }) };
     assert_eq!(ft.to_type(), Type::Array(Box::new(Type::Array(Box::new(Type::String)))));
@@ -298,7 +296,7 @@ fn test_fieldtype_to_type_map() {
         key: Box::new(FieldType::String),
         value: Box::new(FieldType::Int32),
     };
-    assert_eq!(ft.to_type(), Type::Map(Box::new(Type::String), Box::new(Type::Int)));
+    assert_eq!(ft.to_type(), Type::Map(Box::new(Type::String), Box::new(Type::Int32)));
 }
 
 #[test]
@@ -313,7 +311,7 @@ fn test_fieldtype_to_type_struct() {
     };
     match ft.to_type() {
         Type::Struct(fields) => {
-            assert_eq!(fields.get("a").unwrap(), &Type::Int);
+            assert_eq!(fields.get("a").unwrap(), &Type::Int32);
             assert_eq!(fields.get("b").unwrap(), &Type::String);
         }
         _ => panic!("Expected Struct type"),
@@ -325,16 +323,16 @@ fn test_fieldtype_to_type_struct() {
 #[test]
 fn test_row_get_field_exists() {
     let row = Row::from_vec(vec![
-        ("id".to_string(), Value::Int(1)),
+        ("id".to_string(), Value::Int32(1)),
         ("name".to_string(), Value::String("test".to_string())),
     ]);
-    assert_eq!(row.get_field("id").unwrap(), &Value::Int(1));
+    assert_eq!(row.get_field("id").unwrap(), &Value::Int32(1));
     assert_eq!(row.get_field("name").unwrap(), &Value::String("test".to_string()));
 }
 
 #[test]
 fn test_row_get_field_missing() {
-    let row = Row::from_vec(vec![("id".to_string(), Value::Int(1))]);
+    let row = Row::from_vec(vec![("id".to_string(), Value::Int32(1))]);
     assert!(row.get_field("nonexistent").is_none());
 }
 
@@ -355,12 +353,12 @@ fn test_row_from_vec_empty() {
 #[test]
 fn test_table_with_nested_types_json_roundtrip() {
     let mut struct_fields = HashMap::new();
-    struct_fields.insert("x".to_string(), tablec_core::core::table::types::Type::Int);
-    struct_fields.insert("y".to_string(), tablec_core::core::table::types::Type::Int);
+    struct_fields.insert("x".to_string(), tablec_core::core::table::types::Type::Int32);
+    struct_fields.insert("y".to_string(), tablec_core::core::table::types::Type::Int32);
 
     let mut s = IndexMap::new();
-    s.insert("x".to_string(), Value::Int(10));
-    s.insert("y".to_string(), Value::Int(20));
+    s.insert("x".to_string(), Value::Int32(10));
+    s.insert("y".to_string(), Value::Int32(20));
 
     let table = Table {
         name: "test".to_string(),
