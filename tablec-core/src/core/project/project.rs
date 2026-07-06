@@ -38,13 +38,25 @@ impl Project {
 
     pub fn from_excel(name: String, path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let tables = read_excel_with_box(path)?;
-        Ok(Self::from_tables(name, tables))
+        let source = vec![std::path::PathBuf::from(path)];
+        Ok(Self::from_tables_with_source(name, tables, source))
     }
 
     pub fn from_config(config: &Config, input_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let tables = read_excel_with_box(input_path)?;
         let name = config.project.name.clone();
-        Ok(Self::from_tables(name, tables))
+        let source = vec![std::path::PathBuf::from(input_path)];
+        Ok(Self::from_tables_with_source(name, tables, source))
+    }
+
+    /// Same as `from_tables` but stamps `source` (input file paths) into
+    /// `Meta` and seeds `Meta.hash` via `calculate_hash`. Use this when the
+    /// final artifact's hash should be observable to consumers.
+    pub fn from_tables_with_source(name: String, tables: Vec<Table>, source: Vec<std::path::PathBuf>) -> Self {
+        let mut project = Self::from_tables(name, tables);
+        project.meta.source = source;
+        project.calculate_hash();
+        project
     }
 
     pub fn calculate_hash(&mut self) {
