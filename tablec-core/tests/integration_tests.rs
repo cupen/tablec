@@ -4,7 +4,7 @@ use tablec_core::core::table::row::Row;
 use tablec_core::core::table::value::Value;
 use tablec_core::core::table::constraint::Constraint;
 use tablec_core::core::project::project::Project;
-use tablec_core::core::project::meta::Meta;
+use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::export::{Format, Json, Msgpack};
 use indexmap::IndexMap;
 use std::str::FromStr;
@@ -93,8 +93,10 @@ fn build_multi_table_project() -> Project {
         name: "game_data".to_string(),
         meta: Meta {
             version: "1.0.0".to_string(),
-            hash: 98765,
+            hash: [0xfe; 32],
             build_at: 1700000000,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables,
     }
@@ -183,7 +185,7 @@ fn test_full_pipeline_constraint_violation_caught() {
 
     let project = Project {
         name: "bad_project".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables,
     };
 

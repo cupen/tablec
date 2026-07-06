@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use pyo3::Bound;
-use tablec_core::core::project::meta::Meta;
+use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::project::project::Project;
 use tablec_core::core::table::table::Table;
 use tablec_core::export::{Format, Json, Msgpack};
@@ -23,7 +23,7 @@ fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
             .and_then(|s| s.to_str())
             .unwrap_or("untitled")
             .to_string(),
-        meta: Meta { version: "0.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "0.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables: tables.into_iter().map(|t| (t.name.clone(), t)).collect(),
     };
 

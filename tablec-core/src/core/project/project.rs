@@ -1,8 +1,8 @@
+use blake3::Hasher;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::error::Error;
-use std::hash::{Hash, Hasher};
+use crate::core::table::field::Field;
 use crate::core::table::table::Table;
 use super::meta::Meta;
 use super::super::config::Config;
@@ -46,21 +46,32 @@ impl Project {
         let name = config.project.name.clone();
         Ok(Self::from_tables(name, tables))
     }
-    
+
     pub fn calculate_hash(&mut self) {
-        let mut hasher = DefaultHasher::new();
-        self.name.hash(&mut hasher);
-        
-        for (table_name, table) in &self.tables {
-            table_name.hash(&mut hasher);
+        let mut hasher: Hasher = blake3::Hasher::new_derive_key("tablec.project.v1");
+        hasher.update(self.name.as_bytes());
+
+        // Hash sheets in a stable order regardless of IndexMap iteration order.
+        let mut sheets: Vec<(&String, &Table)> = self.tables.iter().collect();
+        sheets.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (sheet_name, table) in sheets {
+            hasher.update(sheet_name.as_bytes());
+
+            // Schema (canonical = JSON with sorted field names).
+            let fields_canon = serde_json::to_vec(&canonical_fields(&table.fields))
+                .expect("fields always serializable");
+            hasher.update(&fields_canon);
+
+            // Data rows, row-order sensitive (any reorder/delete -> byte stream change -> hash change).
             for row in &table.data {
-                // Hash row data
-                let row_str = format!("{:?}", row.fields);
-                row_str.hash(&mut hasher);
+                let row_canon = serde_json::to_vec(&row.fields)
+                    .expect("row always serializable");
+                hasher.update(&row_canon);
             }
         }
-        
-        self.meta.hash = hasher.finish() as i64;
+
+        self.meta.hash = *hasher.finalize().as_bytes();
     }
     
     pub fn validate_all(&self) -> Result<(), Vec<crate::core::diagnostic::Diagnostic>> {
@@ -84,4 +95,19 @@ impl Project {
     pub fn export<F: Format>(&self, format: &F, output: &str) -> Result<(), Box<dyn Error>> {
         format.export(self, output)
     }
+}
+
+/// Render a `Field` set as a `serde_json::Value` object keyed by field name, with
+/// field names sorted alphabetically. This canonicalization makes the hash
+/// independent of the field declaration order in the schema, while still
+/// distinguishing schemas with different field names or types.
+fn canonical_fields(fields: &[Field]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let mut names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    names.sort();
+    for n in names {
+        let f = fields.iter().find(|x| x.name == n).unwrap();
+        map.insert(n.to_string(), serde_json::json!(format!("{:?}", f.t)));
+    }
+    serde_json::Value::Object(map)
 }

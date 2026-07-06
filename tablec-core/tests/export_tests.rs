@@ -1,5 +1,5 @@
 use tablec_core::core::project::project::Project;
-use tablec_core::core::project::meta::Meta;
+use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::table::table::Table;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
@@ -55,8 +55,10 @@ fn make_simple_project() -> Project {
         name: "test_project".to_string(),
         meta: Meta {
             version: "1.0.0".to_string(),
-            hash: 12345,
+            hash: [0xab; 32],
             build_at: 1700000000,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables,
     }
@@ -128,8 +130,10 @@ fn test_json_export_empty_project() {
         name: "empty".to_string(),
         meta: Meta {
             version: "0.1.0".to_string(),
-            hash: 0,
+            hash: [0u8; 32],
             build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables: IndexMap::new(),
     };
@@ -168,8 +172,10 @@ fn test_msgpack_export_empty_project() {
         name: "empty".to_string(),
         meta: Meta {
             version: "0.1.0".to_string(),
-            hash: 0,
+            hash: [0u8; 32],
             build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables: IndexMap::new(),
     };
@@ -205,7 +211,7 @@ fn test_msgpack_export_multi_table() {
 
     let project = Project {
         name: "multi".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables,
     };
 
@@ -245,7 +251,7 @@ fn test_json_export_all_value_types() {
 
     let project = Project {
         name: "types_test".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables,
     };
 
