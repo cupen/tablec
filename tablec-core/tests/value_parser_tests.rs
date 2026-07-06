@@ -90,6 +90,13 @@ fn test_parse_bool_false() {
     assert_eq!(parse_value("false", &FieldType::Bool, loc()).unwrap(), Value::Bool(false));
 }
 
+#[test]
+fn test_parse_bool_numeric() {
+    // Spec §4.2: bool accepts "0"/"1" as well as "true"/"false".
+    assert_eq!(parse_value("1", &FieldType::Bool, loc()).unwrap(), Value::Bool(true));
+    assert_eq!(parse_value("0", &FieldType::Bool, loc()).unwrap(), Value::Bool(false));
+}
+
 // === Basic types: error cases ===
 
 #[test]
