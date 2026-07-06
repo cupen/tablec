@@ -393,7 +393,7 @@ pub fn calculate_hash(&mut self) {
 
 ### 6.5 Hash JSON 表示
 
-- `Meta::hash` 在 JSON / msgpack 中表示为 **32-char hex 字符串**(选项 A)
+- `Meta::hash` 在 JSON / msgpack 中表示为 **64-char hex 字符串**(`[u8;32]` 的完整 2 字符/字节映射)
 - 实装:`Meta` 自定义 `Serialize`/`Deserialize` 把 `[u8;32]` 字段输出为 hex 字符串,避免 serde 默认的 32 个数字数组
 - `impl Display for Meta` 输出 `hash=<hex16> version=… build_at=… source=[…] tool={…}`
 - 这是 breaking:testsuite 现有 fixture 若直接比较 JSON 字节需 snapshot update
@@ -424,7 +424,7 @@ pub fn calculate_hash(&mut self) {
 | c3 Value 八宽度 | 每个宽度 `(parse_value("42", Int8..), FieldType) -> Value` 对应变体;**`"200"` 进 Int8 → `Err(ValueOutOfRange)`** message 含 `[-128, 127]`;空串/非数字 → `ValueParseError`;cross-width `PartialEq` 同字面同值;跨族 `PartialOrd` 样本;Float32 vs Float64 不等;`Serialize` 在 JSON 中类型无损 |
 | c4 read_excel | 故意 fixture:cell "abc" typed int → Diagnostic w/ row+col;多个错误聚合;happy path 与原 fixture 100% 字节一致(向后兼容就靠这条) |
 | c5 constraint table-level | composite unique 在两 Field 同时 uniq → pass;重复 → err 带行号 + 字段集;Project::validate_all 收各 sheet 的错误;row 5 损坏 → `TableConstraintParseError` |
-| c6 Blake3 hash | 同 Project 两次调用 hash 相等;调换两行 → hash 不同;删除一行 → hash 不同;增列 → hash 不同;`Meta::hash_hex()` Display 32-char hex |
+| c6 Blake3 hash | 同 Project 两次调用 hash 相等;调换两行 → hash 不同;删除一行 → hash 不同;增列 → hash 不同;`Meta::hash_hex()` Display 64-char hex |
 
 ### 7.3 共享测试工具
 
@@ -533,7 +533,7 @@ CLI 的错误打印不是本 spec 的范围,但 read_excel 改 `Result<_, Vec<Di
 ## 11. 关闭的开放点
 
 - 跨族数字比较溢出:极少数 corner case 被 Rust 默认 wrap 承担,设计接受(参 §4.3)
-- `Meta.hash` JSON 表示:定为 32-char hex 字符串(参 §6.5)
+- `Meta.hash` JSON 表示:定为 64-char hex 字符串(参 §6.5)
 - testsuite snapshot 批改规则:见 §8.2 与 §7.5
 - plugin 模块处置:不在本 spec,见 §9.3
 
