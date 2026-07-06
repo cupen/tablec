@@ -31,5 +31,9 @@ path = "tests/fixtures/error_cases/build_bad_int_range.rs"
 name = "build_bad_struct_field"
 path = "tests/fixtures/error_cases/build_bad_struct_field.rs"
 
+[[example]]
+name = "build_bad_unique"
+path = "tests/fixtures/error_cases/build_bad_unique.rs"
+
 # [build-dependencies]
 # prost-build = "0.14.1"

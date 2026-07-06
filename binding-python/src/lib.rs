@@ -51,12 +51,10 @@ fn check(input: &str) -> PyResult<()> {
     let tables = read_excel_or_pyerr(input)?;
 
     for table in &tables {
-        table.validate_constraints()
-            .map_err(|errors| {
-                pyo3::exceptions::PyValueError::new_err(
-                    format!("Validation failed for table '{}': {}", table.name, errors.join("; "))
-                )
-            })?;
+        if let Err(errs) = table.validate_constraints() {
+            let msg = errs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n");
+            return Err(pyo3::exceptions::PyValueError::new_err(msg));
+        }
     }
 
     Ok(())

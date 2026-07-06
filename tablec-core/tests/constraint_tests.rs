@@ -480,7 +480,7 @@ fn test_validator_unknown_constraint_function() {
                 name: "id".to_string(),
                 t: FieldType::Int32,
                 desc: "".to_string(),
-                constraint: Some(Constraint { func: "nonexistent".to_string(), args: vec![] }),
+                constraint: Some(Constraint { func: "nonexistent".to_string(), args: vec![], location: Default::default() }),
                 tags: vec![],
             },
         ],

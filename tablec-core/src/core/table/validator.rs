@@ -1,49 +1,53 @@
 use crate::core::table::{table::Table, value::Value};
+use crate::core::diagnostic::Diagnostic;
 use std::collections::HashSet;
 
-pub fn validate_table(table: &Table) -> Result<(), Vec<String>> {
+pub fn validate_table(table: &Table) -> Result<(), Vec<Diagnostic>> {
     let mut errors = Vec::new();
 
-    // Validate field-level constraints
+    // Validate field-level constraints (row 4).
     for field in &table.fields {
         if let Some(constraint) = &field.constraint {
-            match constraint.func.as_str() {
+            let msg = match constraint.func.as_str() {
                 "unique" => {
                     if constraint.args.is_empty() {
-                        // Single field unique constraint
                         let values: Vec<&Value> = table.data.iter()
                             .map(|row| &row.fields[&field.name])
                             .collect();
-                        if let Err(e) = validate_single_unique(&values) {
-                            errors.push(format!("Validation failed for field '{}' with constraint '@unique': {}", field.name, e));
-                        }
+                        validate_single_unique(&values).err()
                     } else {
-                        // Composite unique constraint
                         let mut composite_fields = vec![field.name.clone()];
                         composite_fields.extend(constraint.args.iter().cloned());
-                        if let Err(e) = validate_composite_unique(table, &composite_fields) {
-                            errors.push(format!("Validation failed for composite unique constraint on fields {:?}: {}", composite_fields, e));
-                        }
+                        validate_composite_unique(table, &composite_fields).err()
                     }
                 },
                 "order" => {
                     let values: Vec<&Value> = table.data.iter()
                         .map(|row| &row.fields[&field.name])
                         .collect();
-                    if let Err(e) = validate_order(&values, &constraint.args) {
-                        errors.push(format!("Validation failed for field '{}' with constraint '@order': {}", field.name, e));
-                    }
+                    validate_order(&values, &constraint.args).err()
                 },
                 "seq" => {
                     let values: Vec<&Value> = table.data.iter()
                         .map(|row| &row.fields[&field.name])
                         .collect();
-                    if let Err(e) = validate_seq(&values, &constraint.args) {
-                        errors.push(format!("Validation failed for field '{}' with constraint '@seq': {}", field.name, e));
-                    }
+                    validate_seq(&values, &constraint.args).err()
                 },
-                _ => {},
+                _ => None,
+            };
+            if let Some(m) = msg {
+                errors.push(constraint.to_diagnostic(&m));
             }
+        }
+    }
+
+    // Validate table-level constraints (row 5). Reuse ConstraintValidator's
+    // implementation so the table-level logic is not duplicated; field-level
+    // constraints are NOT re-run here (already covered above) — we filter.
+    for c in &table.constraints {
+        match c.validate(&table.fields, &table.data) {
+            Ok(()) => {}
+            Err(msg) => errors.push(c.to_diagnostic(&msg)),
         }
     }
 

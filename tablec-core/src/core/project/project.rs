@@ -63,16 +63,13 @@ impl Project {
         self.meta.hash = hasher.finish() as i64;
     }
     
-    pub fn validate_all(&self) -> Result<(), Vec<String>> {
+    pub fn validate_all(&self) -> Result<(), Vec<crate::core::diagnostic::Diagnostic>> {
         let mut all_errors = Vec::new();
 
-        for (table_name, table) in &self.tables {
-            match table.validate_constraints() {
-                Ok(_) => {},
-                Err(errors) => {
-                    for error in errors {
-                        all_errors.push(format!("Table '{}': {}", table_name, error));
-                    }
+        for (_table_name, table) in &self.tables {
+            if let Err(errors) = table.validate_constraints() {
+                for d in errors {
+                    all_errors.push(d);
                 }
             }
         }

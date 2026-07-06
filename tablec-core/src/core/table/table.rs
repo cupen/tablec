@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 use super::field::{self, FieldType};
 use super::row::Row;
-use crate::core::diagnostic::{Diagnostic, SourceLocation};
+use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
 use crate::core::parser::value_parser::parse_value;
 
-use super::constraint::{self, ConstraintValidator};
+use super::constraint::{self, Constraint, ConstraintValidator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
@@ -73,6 +73,33 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
             .map(|c| c.to_string())
             .collect();
 
+        // Row 5: table-level constraints (each cell one constraint).
+        let row5_iter = rows.next();
+        let row5: Vec<String> = match row5_iter {
+            Some(r) => r.iter().map(|c| c.to_string()).collect(),
+            None    => vec![],
+        };
+        let mut table_constraints: Vec<Constraint> = Vec::new();
+        for (col_idx, raw) in row5.iter().enumerate() {
+            let cell = raw.trim();
+            if cell.is_empty() { continue; }
+            if !cell.starts_with('@') {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticCode::TableConstraintParseError,
+                    format!("row 5 cell {} must start with @, got '{}'", col_idx + 1, cell),
+                    SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
+                                      line: Some(5), column: Some(col_idx as u32 + 1) },
+                ));
+                continue;
+            }
+            let loc = SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
+                                      line: Some(5), column: Some(col_idx as u32 + 1) };
+            match Constraint::from_str_with_loc(cell, loc) {
+                Ok(c)  => table_constraints.push(c),
+                Err(d) => diagnostics.push(d),
+            }
+        }
+
         let mut fields = Vec::new();
         for i in 0..field_names.len() {
             let name = field_names.get(i).unwrap_or(&"".to_string()).clone();
@@ -121,7 +148,7 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
                 let cell_loc = SourceLocation {
                     file: Some(std::path::PathBuf::from(fpath)),
                     sheet: Some(sheet_name.clone()),
-                    line: Some(row_index as u32 + 5),  // row 1-4 reserved, data starts at row 5
+                    line: Some(row_index as u32 + 6),  // rows 1-5 reserved, data starts at row 6
                     column: Some(col_index as u32 + 1),
                 };
                 match parse_value(&cell_value_str, &field.t, cell_loc) {
@@ -132,19 +159,11 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
             data.push(new_row);
         }
 
-        // Collect constraints from fields
-        let mut constraints = Vec::new();
-        for field in &fields {
-            if let Some(constraint) = &field.constraint {
-                constraints.push(constraint.clone());
-            }
-        }
-
         tables.push(Table {
             name: sheet_name.to_owned(),
             fields,
             data,
-            constraints,
+            constraints: table_constraints,
         });
     }
 
@@ -156,7 +175,7 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
 }
 
 impl Table {
-    pub fn validate_constraints(&self) -> Result<(), Vec<String>> {
+    pub fn validate_constraints(&self) -> Result<(), Vec<Diagnostic>> {
         ConstraintValidator::validate_table(self)
     }
 }
