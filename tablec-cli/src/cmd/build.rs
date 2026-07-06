@@ -113,7 +113,14 @@ impl BuildCommand {
         format: &str,
         include_fields: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let tables = read_excel(input)?;
+        let tables = match read_excel(input) {
+            Ok(t) => t,
+            Err(errs) => {
+                let n = errs.len();
+                for d in errs { eprintln!("{}", d); }
+                return Err(format!("read_excel failed with {} diagnostics", n).into());
+            }
+        };
         let project = Project::from_tables("unnamed".to_string(), tables);
 
         match format {
@@ -140,7 +147,14 @@ impl BuildCommand {
         // Merge all tables from all files
         let mut all_tables = Vec::new();
         for file_path in files {
-            let tables = read_excel(file_path.to_str().unwrap())?;
+            let tables = match read_excel(file_path.to_str().unwrap()) {
+                Ok(t) => t,
+                Err(errs) => {
+                    let n = errs.len();
+                    for d in errs { eprintln!("{}", d); }
+                    return Err(format!("read_excel failed with {} diagnostics", n).into());
+                }
+            };
             all_tables.extend(tables);
         }
 
@@ -165,7 +179,14 @@ impl BuildCommand {
 
 // This function is for the python library, returning the JSON as a string.
 pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> Result<String, Box<dyn Error>> {
-    let tables = read_excel(input_path)?;
+    let tables = match read_excel(input_path) {
+        Ok(t) => t,
+        Err(errs) => {
+            let n = errs.len();
+            for d in errs { eprintln!("{}", d); }
+            return Err(format!("read_excel failed with {} diagnostics", n).into());
+        }
+    };
     let project = Project::from_tables("unnamed".to_string(), tables);
     match format {
         "json" => {

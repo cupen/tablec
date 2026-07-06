@@ -23,5 +23,13 @@ rust_xlsxwriter = "0.90"
 name = "basic_bench"
 harness = false
 
+[[example]]
+name = "build_bad_int_range"
+path = "tests/fixtures/error_cases/build_bad_int_range.rs"
+
+[[example]]
+name = "build_bad_struct_field"
+path = "tests/fixtures/error_cases/build_bad_struct_field.rs"
+
 # [build-dependencies]
 # prost-build = "0.14.1"

@@ -1,11 +1,10 @@
 use calamine::{open_workbook_auto, Reader, Data};
 use serde::{Serialize, Deserialize};
-use std::error::Error;
 use std::str::FromStr;
 
 use super::field::{self, FieldType};
 use super::row::Row;
-use crate::core::diagnostic::SourceLocation;
+use crate::core::diagnostic::{Diagnostic, SourceLocation};
 use crate::core::parser::value_parser::parse_value;
 
 use super::constraint::{self, ConstraintValidator};
@@ -18,14 +17,19 @@ pub struct Table {
     pub constraints: Vec<constraint::Constraint>,
 }
 
-fn diag_to_box(e: crate::core::diagnostic::Diagnostic) -> Box<dyn Error> {
-    let s: String = e.to_string();
-    Box::<dyn Error>::from(s)
-}
-
-pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
-    let mut workbook = open_workbook_auto(fpath)?;
+pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
+    let mut workbook = match open_workbook_auto(fpath) {
+        Ok(wb) => wb,
+        Err(e) => {
+            return Err(vec![Diagnostic::new(
+                crate::core::diagnostic::DiagnosticCode::Other,
+                format!("failed to open workbook '{}': {}", fpath, e),
+                SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: None, line: None, column: None },
+            )]);
+        }
+    };
     let mut tables = vec![];
+    let mut diagnostics: Vec<Diagnostic> = vec![];
 
     for sheet_name in workbook.sheet_names().to_owned() {
         if sheet_name.starts_with('#') {
@@ -120,9 +124,10 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
                     line: Some(row_index as u32 + 5),  // row 1-4 reserved, data starts at row 5
                     column: Some(col_index as u32 + 1),
                 };
-                let value = parse_value(&cell_value_str, &field.t, cell_loc).map_err(diag_to_box)?;
-
-                new_row.add_field(field.name.clone(), value);
+                match parse_value(&cell_value_str, &field.t, cell_loc) {
+                    Ok(value) => { new_row.add_field(field.name.clone(), value); }
+                    Err(d) => { diagnostics.push(d); }
+                }
             }
             data.push(new_row);
         }
@@ -142,7 +147,12 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
             constraints,
         });
     }
-    Ok(tables)
+
+    if diagnostics.is_empty() {
+        Ok(tables)
+    } else {
+        Err(diagnostics)
+    }
 }
 
 impl Table {

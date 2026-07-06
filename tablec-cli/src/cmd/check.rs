@@ -88,9 +88,11 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            Err(e) => {
-                total_errors += 1;
-                eprintln!("  Error reading file: {}", e);
+            Err(errs) => {
+                total_errors += errs.len();
+                for d in errs {
+                    eprintln!("  Error: {}", d);
+                }
             }
         }
     }

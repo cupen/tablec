@@ -8,6 +8,13 @@ use super::meta::Meta;
 use super::super::config::Config;
 use crate::export::Format;
 
+fn read_excel_with_box(path: &str) -> Result<Vec<Table>, Box<dyn std::error::Error>> {
+    crate::core::table::table::read_excel(path).map_err(|errs| {
+        let msg = errs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n");
+        Box::<dyn std::error::Error>::from(msg)
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
@@ -28,14 +35,14 @@ impl Project {
             tables: table_map,
         }
     }
-    
+
     pub fn from_excel(name: String, path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let tables = crate::core::table::table::read_excel(path)?;
+        let tables = read_excel_with_box(path)?;
         Ok(Self::from_tables(name, tables))
     }
-    
+
     pub fn from_config(config: &Config, input_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let tables = crate::core::table::table::read_excel(input_path)?;
+        let tables = read_excel_with_box(input_path)?;
         let name = config.project.name.clone();
         Ok(Self::from_tables(name, tables))
     }
