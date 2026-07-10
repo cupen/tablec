@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tablec_core::core::config::{self, Config};
 use tablec_core::core::table::table::read_excel;
 use tablec_core::core::project::project::Project;
-use tablec_core::export::{self, Format, Json, Msgpack};
+use tablec_core::export::{Format, Json, Msgpack};
 
 #[derive(Args, Debug)]
 pub struct BuildCommand {
@@ -113,7 +113,14 @@ impl BuildCommand {
         format: &str,
         include_fields: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let tables = read_excel(input)?;
+        let tables = match read_excel(input) {
+            Ok(t) => t,
+            Err(errs) => {
+                let n = errs.len();
+                for d in errs { eprintln!("{}", d); }
+                return Err(format!("read_excel failed with {} diagnostics", n).into());
+            }
+        };
         let project = Project::from_tables("unnamed".to_string(), tables);
 
         match format {
@@ -140,7 +147,14 @@ impl BuildCommand {
         // Merge all tables from all files
         let mut all_tables = Vec::new();
         for file_path in files {
-            let tables = read_excel(file_path.to_str().unwrap())?;
+            let tables = match read_excel(file_path.to_str().unwrap()) {
+                Ok(t) => t,
+                Err(errs) => {
+                    let n = errs.len();
+                    for d in errs { eprintln!("{}", d); }
+                    return Err(format!("read_excel failed with {} diagnostics", n).into());
+                }
+            };
             all_tables.extend(tables);
         }
 
@@ -165,10 +179,20 @@ impl BuildCommand {
 
 // This function is for the python library, returning the JSON as a string.
 pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> Result<String, Box<dyn Error>> {
-    let tables = read_excel(input_path)?;
+    let tables = match read_excel(input_path) {
+        Ok(t) => t,
+        Err(errs) => {
+            let n = errs.len();
+            for d in errs { eprintln!("{}", d); }
+            return Err(format!("read_excel failed with {} diagnostics", n).into());
+        }
+    };
+    let project = Project::from_tables("unnamed".to_string(), tables);
     match format {
         "json" => {
-            export::json::to_string(&tables, include_fields)
+            let json = Json { pretty: true, include_fields };
+            let bytes = json.to_vec(&project)?;
+            Ok(String::from_utf8(bytes)?)
         }
         // Other formats could be added here if needed.
         _ => Err(format!("Unsupported format '{}'.", format).into()),

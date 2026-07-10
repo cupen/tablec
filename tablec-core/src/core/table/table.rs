@@ -1,14 +1,13 @@
 use calamine::{open_workbook_auto, Reader, Data};
 use serde::{Serialize, Deserialize};
-use std::error::Error;
 use std::str::FromStr;
 
 use super::field::{self, FieldType};
 use super::row::Row;
-use super::value::Value;
-use crate::core::parser::value_parser::parse_value as parse_value_from_str;
+use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
+use crate::core::parser::value_parser::parse_value;
 
-use super::constraint::{self, ConstraintValidator};
+use super::constraint::{self, Constraint, ConstraintValidator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
@@ -18,9 +17,19 @@ pub struct Table {
     pub constraints: Vec<constraint::Constraint>,
 }
 
-pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
-    let mut workbook = open_workbook_auto(fpath)?;
+pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
+    let mut workbook = match open_workbook_auto(fpath) {
+        Ok(wb) => wb,
+        Err(e) => {
+            return Err(vec![Diagnostic::new(
+                crate::core::diagnostic::DiagnosticCode::Other,
+                format!("failed to open workbook '{}': {}", fpath, e),
+                SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: None, line: None, column: None },
+            )]);
+        }
+    };
     let mut tables = vec![];
+    let mut diagnostics: Vec<Diagnostic> = vec![];
 
     for sheet_name in workbook.sheet_names().to_owned() {
         if sheet_name.starts_with('#') {
@@ -63,6 +72,33 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
             .iter()
             .map(|c| c.to_string())
             .collect();
+
+        // Row 5: table-level constraints (each cell one constraint).
+        let row5_iter = rows.next();
+        let row5: Vec<String> = match row5_iter {
+            Some(r) => r.iter().map(|c| c.to_string()).collect(),
+            None    => vec![],
+        };
+        let mut table_constraints: Vec<Constraint> = Vec::new();
+        for (col_idx, raw) in row5.iter().enumerate() {
+            let cell = raw.trim();
+            if cell.is_empty() { continue; }
+            if !cell.starts_with('@') {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticCode::TableConstraintParseError,
+                    format!("row 5 cell {} must start with @, got '{}'", col_idx + 1, cell),
+                    SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
+                                      line: Some(5), column: Some(col_idx as u32 + 1) },
+                ));
+                continue;
+            }
+            let loc = SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
+                                      line: Some(5), column: Some(col_idx as u32 + 1) };
+            match Constraint::from_str_with_loc(cell, loc) {
+                Ok(c)  => table_constraints.push(c),
+                Err(d) => diagnostics.push(d),
+            }
+        }
 
         let mut fields = Vec::new();
         for i in 0..field_names.len() {
@@ -109,37 +145,37 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Box<dyn Error>> {
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "".to_string());
 
-                let value = parse_value_from_str(&cell_value_str, &field.t.to_type())
-                    .unwrap_or_else(|e| {
-                        eprintln!("Failed to parse value '{}' for field '{}' at row {}: {}. Defaulting to Null.", cell_value_str, field.name, row_index + 5, e);
-                        Value::Null
-                    });
-
-                new_row.add_field(field.name.clone(), value);
+                let cell_loc = SourceLocation {
+                    file: Some(std::path::PathBuf::from(fpath)),
+                    sheet: Some(sheet_name.clone()),
+                    line: Some(row_index as u32 + 6),  // rows 1-5 reserved, data starts at row 6
+                    column: Some(col_index as u32 + 1),
+                };
+                match parse_value(&cell_value_str, &field.t, cell_loc) {
+                    Ok(value) => { new_row.add_field(field.name.clone(), value); }
+                    Err(d) => { diagnostics.push(d); }
+                }
             }
             data.push(new_row);
-        }
-
-        // Collect constraints from fields
-        let mut constraints = Vec::new();
-        for field in &fields {
-            if let Some(constraint) = &field.constraint {
-                constraints.push(constraint.clone());
-            }
         }
 
         tables.push(Table {
             name: sheet_name.to_owned(),
             fields,
             data,
-            constraints,
+            constraints: table_constraints,
         });
     }
-    Ok(tables)
+
+    if diagnostics.is_empty() {
+        Ok(tables)
+    } else {
+        Err(diagnostics)
+    }
 }
 
 impl Table {
-    pub fn validate_constraints(&self) -> Result<(), Vec<String>> {
+    pub fn validate_constraints(&self) -> Result<(), Vec<Diagnostic>> {
         ConstraintValidator::validate_table(self)
     }
 }
@@ -149,6 +185,7 @@ mod tests {
     use super::*;
     use crate::core::table::row::Row;
     use crate::core::table::value::Value;
+    use crate::export::Format;
 
     #[test]
     fn test_read_excel_basic() {
@@ -180,11 +217,11 @@ mod tests {
             ],
             data: vec![
                 Row::from_vec(vec![
-                    ("ID".to_string(), Value::Int(1)),
+                    ("ID".to_string(), Value::Int32(1)),
                     ("Name".to_string(), Value::String("Alice".to_string())),
                 ]),
                 Row::from_vec(vec![
-                    ("ID".to_string(), Value::Int(2)),
+                    ("ID".to_string(), Value::Int32(2)),
                     ("Name".to_string(), Value::String("Bob".to_string())),
                 ]),
             ],
@@ -193,12 +230,20 @@ mod tests {
 
         // 测试JSON导出
         let tables = vec![table];
-        let result = crate::export::json::to_string(&tables, true);
+        let project = crate::core::project::project::Project::from_tables("test_project".to_string(), tables);
+        let json = crate::export::Json { pretty: false, include_fields: true };
+        let result = json.to_vec(&project);
         assert!(result.is_ok(), "JSON export failed: {:?}", result.err());
 
-        let json_str = result.unwrap();
+        let json_str = String::from_utf8(result.unwrap()).unwrap();
         assert!(json_str.contains("test_table"), "JSON should contain table name");
         assert!(json_str.contains("Alice"), "JSON should contain data");
         assert!(json_str.contains("fields"), "JSON should contain fields when include_fields=true");
+    }
+
+    #[test]
+    fn out_of_range_cell_yields_clear_error() {
+        // Generate an in-memory workbook-like construction? Tests of read_excel
+        // require real .xlsx files; defer detailed xlsx tests to error_cases fixtures (c4).
     }
 }

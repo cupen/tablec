@@ -5,53 +5,97 @@ use crate::core::table::row::Row;
 use crate::core::table::field::Field;
 use crate::core::table::value::Value;
 use crate::core::table::table::Table;
+use crate::core::diagnostic::{Diagnostic, SourceLocation, DiagnosticCode};
+
+use crate::core::table::value::Value::{
+    Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64,
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Constraint {
     pub func: String,
     pub args: Vec<String>,
+    pub location: SourceLocation,
+}
+
+impl Constraint {
+    pub fn from_str_with_loc(s: &str, loc: SourceLocation) -> Result<Self, Diagnostic> {
+        if !s.starts_with('@') {
+            return Err(Diagnostic::new(DiagnosticCode::TableConstraintParseError,
+                "constraint must start with @".to_string(), loc));
+        }
+        let body = &s[1..];
+        let (func, args) = if let Some(idx) = body.find('(') {
+            // Require a matching ')'. Brief's verbatim `body[idx+1..body.len()-1]`
+            // would panic on a missing closing paren; reject explicitly.
+            if !body.ends_with(')') {
+                return Err(Diagnostic::new(DiagnosticCode::TableConstraintParseError,
+                    "missing closing parenthesis in constraint".to_string(), loc));
+            }
+            let f = body[..idx].trim();
+            if f.is_empty() {
+                return Err(Diagnostic::new(DiagnosticCode::TableConstraintParseError,
+                    "empty function name".to_string(), loc));
+            }
+            let arg_str = &body[idx+1..body.len()-1];
+            let args: Vec<String> = if arg_str.trim().is_empty() { vec![] } else {
+                arg_str.split(',').map(|s| s.trim().to_string()).collect()
+            };
+            (f.to_string(), args)
+        } else {
+            // No parens: function name must be a single token (no spaces).
+            // Preserves pre-c5 `FromStr` test semantics (`@func arg1, arg2` rejected).
+            if body.trim().is_empty() {
+                return Err(Diagnostic::new(DiagnosticCode::TableConstraintParseError,
+                    "empty function name".to_string(), loc));
+            }
+            let f = body.trim();
+            if f.contains(' ') {
+                return Err(Diagnostic::new(DiagnosticCode::TableConstraintParseError,
+                    "missing parentheses in constraint".to_string(), loc));
+            }
+            (f.to_string(), vec![])
+        };
+        Ok(Self { func, args, location: loc })
+    }
+
+    pub fn to_diagnostic(&self, msg: &str) -> Diagnostic {
+        let code = match self.func.as_str() {
+            "unique" => DiagnosticCode::ConstraintDuplicate,
+            "seq"    => DiagnosticCode::ConstraintSequenceBroken,
+            "order"  => DiagnosticCode::ConstraintOrderViolation,
+            _        => DiagnosticCode::ConstraintUnknown,
+        };
+        let sig = if self.args.is_empty() {
+            self.func.clone()
+        } else {
+            format!("{}({})", self.func, self.args.join(", "))
+        };
+        Diagnostic::new(code, format!("@{}: {}", sig, msg), self.location.clone())
+    }
 }
 
 impl FromStr for Constraint {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if !s.starts_with('@') {
-            return Err(());
-        }
+        Constraint::from_str_with_loc(s, SourceLocation::default()).map_err(|_| ())
+    }
+}
 
-        let s = &s[1..]; // Remove @
-
-        let func: String;
-        let args: Vec<String>;
-
-        if let Some(open_paren_idx) = s.find('(') {
-            // Case: @func(...)
-            func = s[..open_paren_idx].trim().to_string();
-            if func.contains(' ') { // Function name itself should not contain spaces before '('
-                return Err(());
-            }
-
-            let arg_part = &s[open_paren_idx + 1..];
-            if !arg_part.ends_with(')') {
-                return Err(()); // Missing closing parenthesis
-            }
-            let arg_str = &arg_part[..arg_part.len() - 1]; // Remove )
-            args = arg_str.split(',').map(|s| s.trim().to_string()).collect();
-        } else {
-            // Case: @func (no parentheses)
-            func = s.trim().to_string();
-            if func.contains(' ') { // If no parentheses, func must be a single word
-                return Err(());
-            }
-            args = Vec::new();
-        }
-
-        if func.is_empty() {
-            return Err(());
-        }
-
-        Ok(Constraint { func, args })
+fn numeric_i64(v: &Value) -> Option<i64> {
+    match v {
+        Int8(n)  => Some(*n as i64),
+        Int16(n) => Some(*n as i64),
+        Int32(n) => Some(*n as i64),
+        Int64(n) => Some(*n),
+        Uint8(n)  => Some(*n as i64),
+        Uint16(n) => Some(*n as i64),
+        // Uint32 may exceed i64 for top bit set; treat as overflow and reject.
+        Uint32(n) if *n <= i64::MAX as u32 => Some(*n as i64),
+        Uint64(n) if *n <= i64::MAX as u64 => Some(*n as i64),
+        Uint32(_) | Uint64(_) => None,
+        _ => None,
     }
 }
 
@@ -115,20 +159,9 @@ impl Constraint {
 
         for (row_index, row) in rows.iter().enumerate() {
             if let Some(value) = row.get_field(field_name) {
-                match value {
-                    Value::Int(n) => {
-                        if *n != expected_value {
-                            return Err(format!("Expected {} at row {}, but found {}",
-                                expected_value, row_index + 1, n));
-                        }
-                    }
-                    Value::Uint(n) => {
-                        if *n != expected_value as u64 {
-                            return Err(format!("Expected {} at row {}, but found {}",
-                                expected_value, row_index + 1, n));
-                        }
-                    }
-                    _ => return Err(format!("@seq constraint requires numeric field '{}'", field_name)),
+                let n = numeric_i64(value).ok_or_else(|| format!("@seq requires numeric field '{}'", field_name))?;
+                if n != expected_value {
+                    return Err(format!("expected {} at row {} but found {}", expected_value, row_index + 1, n));
                 }
             } else {
                 return Err(format!("Field '{}' not found in row {}", field_name, row_index + 1));
@@ -186,30 +219,22 @@ impl Constraint {
 pub struct ConstraintValidator;
 
 impl ConstraintValidator {
-    pub fn validate_table(table: &Table) -> Result<(), Vec<String>> {
+    pub fn validate_table(table: &Table) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
 
-        // Group constraints by field
-        let mut field_constraints: Vec<(&Field, &Constraint)> = Vec::new();
-        let table_constraints: Vec<&Constraint> = Vec::new();
-
+        // Field-level constraints (constraint declared in row 4 column).
         for field in &table.fields {
             if let Some(constraint) = &field.constraint {
-                field_constraints.push((field, constraint));
+                if let Err(msg) = constraint.validate(&[field.clone()], &table.data) {
+                    errors.push(constraint.to_diagnostic(&msg));
+                }
             }
         }
 
-        // Validate field-level constraints
-        for (field, constraint) in field_constraints {
-            if let Err(error) = constraint.validate(&[field.clone()], &table.data) {
-                errors.push(format!("Field '{}': {}", field.name, error));
-            }
-        }
-
-        // Validate table-level constraints
-        for constraint in table_constraints {
-            if let Err(error) = constraint.validate(&table.fields, &table.data) {
-                errors.push(format!("Table-level constraint: {}", error));
+        // Table-level constraints (row 5).
+        for constraint in &table.constraints {
+            if let Err(msg) = constraint.validate(&table.fields, &table.data) {
+                errors.push(constraint.to_diagnostic(&msg));
             }
         }
 
@@ -224,6 +249,8 @@ impl ConstraintValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::table::field::FieldType;
+
     #[test]
     fn test_ok() {
         let valid_str = "@func(arg1, arg2)";
@@ -264,16 +291,16 @@ mod tests {
         }];
 
         let rows = vec![
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("id".to_string(), Value::Int(2))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
         ];
 
         assert!(unique_constraint.validate(&fields, &rows).is_ok());
 
         // Test duplicate values
         let duplicate_rows = vec![
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
         ];
 
         assert!(unique_constraint.validate(&fields, &duplicate_rows).is_err());
@@ -289,17 +316,17 @@ mod tests {
         }];
 
         let seq_rows = vec![
-            Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("seq".to_string(), Value::Int(2))]),
-            Row::from_vec(vec![("seq".to_string(), Value::Int(3))]),
+            Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("seq".to_string(), Value::Int32(2))]),
+            Row::from_vec(vec![("seq".to_string(), Value::Int32(3))]),
         ];
 
         assert!(seq_constraint.validate(&seq_fields, &seq_rows).is_ok());
 
         // Test broken sequence
         let broken_rows = vec![
-            Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("seq".to_string(), Value::Int(3))]),
+            Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("seq".to_string(), Value::Int32(3))]),
         ];
 
         assert!(seq_constraint.validate(&seq_fields, &broken_rows).is_err());
@@ -315,20 +342,34 @@ mod tests {
         }];
 
         let ordered_rows = vec![
-            Row::from_vec(vec![("value".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("value".to_string(), Value::Int(2))]),
-            Row::from_vec(vec![("value".to_string(), Value::Int(3))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(2))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(3))]),
         ];
 
         assert!(order_constraint.validate(&order_fields, &ordered_rows).is_ok());
 
         // Test unordered rows
         let unordered_rows = vec![
-            Row::from_vec(vec![("value".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("value".to_string(), Value::Int(3))]),
-            Row::from_vec(vec![("value".to_string(), Value::Int(2))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(3))]),
+            Row::from_vec(vec![("value".to_string(), Value::Int32(2))]),
         ];
 
         assert!(order_constraint.validate(&order_fields, &unordered_rows).is_err());
+    }
+
+    #[test]
+    fn validate_sequence_handles_each_width() {
+        let c = Constraint::from_str("@seq").unwrap();
+        let fields = vec![Field {
+            name: "n".into(), t: FieldType::Int16,
+            desc: "".into(), constraint: Some(c.clone()), tags: vec![],
+        }];
+        let rows = vec![
+            Row::from_vec(vec![("n".into(), Value::Int16(1))]),
+            Row::from_vec(vec![("n".into(), Value::Int16(2))]),
+        ];
+        assert!(c.validate(&fields, &rows).is_ok());
     }
 }

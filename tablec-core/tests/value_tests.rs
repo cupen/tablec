@@ -13,22 +13,22 @@ fn hash<T: Hash>(t: &T) -> u64 {
 
 #[test]
 fn test_display_int() {
-    assert_eq!(Value::Int(42).to_string(), "42");
-    assert_eq!(Value::Int(-7).to_string(), "-7");
-    assert_eq!(Value::Int(0).to_string(), "0");
+    assert_eq!(Value::Int32(42).to_string(), "42");
+    assert_eq!(Value::Int32(-7).to_string(), "-7");
+    assert_eq!(Value::Int32(0).to_string(), "0");
 }
 
 #[test]
 fn test_display_uint() {
-    assert_eq!(Value::Uint(0).to_string(), "0");
-    assert_eq!(Value::Uint(999).to_string(), "999");
+    assert_eq!(Value::Uint32(0).to_string(), "0");
+    assert_eq!(Value::Uint32(999).to_string(), "999");
 }
 
 #[test]
 fn test_display_float() {
-    let v = Value::Float(3.14);
+    let v = Value::Float64(3.14);
     assert!(v.to_string().contains("3.14"));
-    let v = Value::Float(-0.5);
+    let v = Value::Float64(-0.5);
     assert!(v.to_string().contains("-0.5"));
 }
 
@@ -52,9 +52,9 @@ fn test_display_null() {
 #[test]
 fn test_display_array() {
     let arr = Value::Array(vec![
-        Value::Int(1),
-        Value::Int(2),
-        Value::Int(3),
+        Value::Int32(1),
+        Value::Int32(2),
+        Value::Int32(3),
     ]);
     assert_eq!(arr.to_string(), "[1, 2, 3]");
 }
@@ -68,8 +68,8 @@ fn test_display_array_empty() {
 #[test]
 fn test_display_array_nested() {
     let arr = Value::Array(vec![
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-        Value::Array(vec![Value::Int(3)]),
+        Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
+        Value::Array(vec![Value::Int32(3)]),
     ]);
     assert_eq!(arr.to_string(), "[[1, 2], [3]]");
 }
@@ -77,8 +77,8 @@ fn test_display_array_nested() {
 #[test]
 fn test_display_map() {
     let mut map = IndexMap::new();
-    map.insert(Value::Int(1), Value::String("a".to_string()));
-    map.insert(Value::Int(2), Value::String("b".to_string()));
+    map.insert(Value::Int32(1), Value::String("a".to_string()));
+    map.insert(Value::Int32(2), Value::String("b".to_string()));
     let v = Value::Map(map);
     let s = v.to_string();
     assert!(s.starts_with('{'));
@@ -90,8 +90,8 @@ fn test_display_map() {
 #[test]
 fn test_display_struct() {
     let mut s = IndexMap::new();
-    s.insert("x".to_string(), Value::Int(1));
-    s.insert("y".to_string(), Value::Float(2.0));
+    s.insert("x".to_string(), Value::Int32(1));
+    s.insert("y".to_string(), Value::Float64(2.0));
     let v = Value::Struct(s);
     let d = v.to_string();
     assert!(d.starts_with('{'));
@@ -104,65 +104,65 @@ fn test_display_struct() {
 
 #[test]
 fn test_eq_int() {
-    assert_eq!(Value::Int(1), Value::Int(1));
-    assert_ne!(Value::Int(1), Value::Int(2));
+    assert_eq!(Value::Int32(1), Value::Int32(1));
+    assert_ne!(Value::Int32(1), Value::Int32(2));
 }
 
 #[test]
 fn test_eq_uint() {
-    assert_eq!(Value::Uint(5), Value::Uint(5));
-    assert_ne!(Value::Uint(5), Value::Uint(6));
+    assert_eq!(Value::Uint32(5), Value::Uint32(5));
+    assert_ne!(Value::Uint32(5), Value::Uint32(6));
 }
 
 #[test]
 fn test_eq_float() {
-    assert_eq!(Value::Float(1.0), Value::Float(1.0));
-    assert_ne!(Value::Float(1.0), Value::Float(2.0));
+    assert_eq!(Value::Float64(1.0), Value::Float64(1.0));
+    assert_ne!(Value::Float64(1.0), Value::Float64(2.0));
 }
 
 #[test]
 fn test_eq_cross_type_none() {
-    assert_ne!(Value::Int(1), Value::String("1".to_string()));
-    assert_ne!(Value::Bool(true), Value::Int(1));
-    assert_ne!(Value::Null, Value::Int(0));
+    assert_ne!(Value::Int32(1), Value::String("1".to_string()));
+    assert_ne!(Value::Bool(true), Value::Int32(1));
+    assert_ne!(Value::Null, Value::Int32(0));
 }
 
 #[test]
 fn test_eq_array() {
     assert_eq!(
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
+        Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
+        Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
     );
     assert_ne!(
-        Value::Array(vec![Value::Int(1)]),
-        Value::Array(vec![Value::Int(2)]),
+        Value::Array(vec![Value::Int32(1)]),
+        Value::Array(vec![Value::Int32(2)]),
     );
 }
 
 #[test]
 fn test_eq_map() {
     let mut m1 = IndexMap::new();
-    m1.insert(Value::String("k".to_string()), Value::Int(1));
+    m1.insert(Value::String("k".to_string()), Value::Int32(1));
     let mut m2 = IndexMap::new();
-    m2.insert(Value::String("k".to_string()), Value::Int(1));
+    m2.insert(Value::String("k".to_string()), Value::Int32(1));
     assert_eq!(Value::Map(m1), Value::Map(m2));
 }
 
 #[test]
 fn test_eq_struct_same() {
     let mut s1 = IndexMap::new();
-    s1.insert("a".to_string(), Value::Int(1));
+    s1.insert("a".to_string(), Value::Int32(1));
     let mut s2 = IndexMap::new();
-    s2.insert("a".to_string(), Value::Int(1));
+    s2.insert("a".to_string(), Value::Int32(1));
     assert_eq!(Value::Struct(s1), Value::Struct(s2));
 }
 
 #[test]
 fn test_eq_struct_diff_vals() {
     let mut s1 = IndexMap::new();
-    s1.insert("a".to_string(), Value::Int(1));
+    s1.insert("a".to_string(), Value::Int32(1));
     let mut s2 = IndexMap::new();
-    s2.insert("a".to_string(), Value::Int(2));
+    s2.insert("a".to_string(), Value::Int32(2));
     assert_ne!(Value::Struct(s1), Value::Struct(s2));
 }
 
@@ -170,35 +170,35 @@ fn test_eq_struct_diff_vals() {
 
 #[test]
 fn test_cmp_int() {
-    assert!(Value::Int(1) < Value::Int(2));
-    assert!(Value::Int(2) > Value::Int(1));
-    assert_eq!(Value::Int(1).partial_cmp(&Value::Int(1)), Some(std::cmp::Ordering::Equal));
+    assert!(Value::Int32(1) < Value::Int32(2));
+    assert!(Value::Int32(2) > Value::Int32(1));
+    assert_eq!(Value::Int32(1).partial_cmp(&Value::Int32(1)), Some(std::cmp::Ordering::Equal));
 }
 
 #[test]
 fn test_cmp_float() {
-    assert!(Value::Float(1.0) < Value::Float(2.0));
-    assert!(Value::Float(2.0) > Value::Float(1.0));
+    assert!(Value::Float64(1.0) < Value::Float64(2.0));
+    assert!(Value::Float64(2.0) > Value::Float64(1.0));
 }
 
 #[test]
 fn test_cmp_cross_int_float() {
-    assert!(Value::Int(1) < Value::Float(2.0));
-    assert!(Value::Float(1.5) > Value::Int(1));
-    assert_eq!(Value::Int(1).partial_cmp(&Value::Float(1.0)), Some(std::cmp::Ordering::Equal));
+    assert!(Value::Int32(1) < Value::Float64(2.0));
+    assert!(Value::Float64(1.5) > Value::Int32(1));
+    assert_eq!(Value::Int32(1).partial_cmp(&Value::Float64(1.0)), Some(std::cmp::Ordering::Equal));
 }
 
 #[test]
 fn test_cmp_cross_uint_float() {
-    assert!(Value::Uint(1) < Value::Float(2.0));
-    assert!(Value::Float(2.0) > Value::Uint(1));
+    assert!(Value::Uint32(1) < Value::Float64(2.0));
+    assert!(Value::Float64(2.0) > Value::Uint32(1));
 }
 
 #[test]
 fn test_cmp_cross_int_uint() {
-    assert!(Value::Int(1) < Value::Uint(5));
-    assert!(Value::Uint(5) > Value::Int(1));
-    assert_eq!(Value::Int(1).partial_cmp(&Value::Uint(1)), Some(std::cmp::Ordering::Equal));
+    assert!(Value::Int32(1) < Value::Uint32(5));
+    assert!(Value::Uint32(5) > Value::Int32(1));
+    assert_eq!(Value::Int32(1).partial_cmp(&Value::Uint32(1)), Some(std::cmp::Ordering::Equal));
 }
 
 #[test]
@@ -210,37 +210,37 @@ fn test_cmp_string() {
 #[test]
 fn test_cmp_incomparable() {
     assert_eq!(Value::Bool(true).partial_cmp(&Value::Bool(false)), None);
-    assert_eq!(Value::String("a".to_string()).partial_cmp(&Value::Int(1)), None);
+    assert_eq!(Value::String("a".to_string()).partial_cmp(&Value::Int32(1)), None);
     assert_eq!(Value::Null.partial_cmp(&Value::Null), None);
 }
 
 #[test]
 fn test_cmp_negative_values() {
-    assert!(Value::Int(-5) < Value::Int(-1));
-    assert!(Value::Int(-1) > Value::Int(-5));
-    assert!(Value::Float(-0.5) < Value::Float(0.5));
+    assert!(Value::Int32(-5) < Value::Int32(-1));
+    assert!(Value::Int32(-1) > Value::Int32(-5));
+    assert!(Value::Float64(-0.5) < Value::Float64(0.5));
 }
 
 // === Hash ===
 
 #[test]
 fn test_hash_consistency() {
-    let v1 = Value::Int(42);
-    let v2 = Value::Int(42);
+    let v1 = Value::Int32(42);
+    let v2 = Value::Int32(42);
     assert_eq!(hash(&v1), hash(&v2));
 }
 
 #[test]
 fn test_hash_different_values() {
-    let v1 = Value::Int(1);
+    let v1 = Value::Int32(1);
     let v2 = Value::String("1".to_string());
     assert_ne!(hash(&v1), hash(&v2));
 }
 
 #[test]
 fn test_hash_array_order_matters() {
-    let a1 = Value::Array(vec![Value::Int(1), Value::Int(2)]);
-    let a2 = Value::Array(vec![Value::Int(2), Value::Int(1)]);
+    let a1 = Value::Array(vec![Value::Int32(1), Value::Int32(2)]);
+    let a2 = Value::Array(vec![Value::Int32(2), Value::Int32(1)]);
     assert_ne!(hash(&a1), hash(&a2));
 }
 
@@ -250,22 +250,27 @@ fn test_hash_array_order_matters() {
 // Int→Uint is expected since JSON doesn't preserve signedness.
 #[test]
 fn test_serde_int_to_json() {
-    let v = Value::Int(42);
+    let v = Value::Int32(42);
     let json = serde_json::to_string(&v).unwrap();
     assert_eq!(json, "42");
 }
 
 #[test]
 fn test_serde_roundtrip_uint() {
-    let v = Value::Uint(100);
+    // c3: JSON deserialize infers Uint64 (serde_json's default for unsigned);
+    // so we assert that the numeric value roundtrips, not the exact width.
+    let v = Value::Uint32(100);
     let json = serde_json::to_string(&v).unwrap();
     let back: Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(v, back);
+    match back {
+        Value::Uint64(n) => assert_eq!(n, 100),
+        other => panic!("expected Uint64 after roundtrip, got {:?}", other),
+    }
 }
 
 #[test]
 fn test_serde_roundtrip_float() {
-    let v = Value::Float(3.14);
+    let v = Value::Float64(3.14);
     let json = serde_json::to_string(&v).unwrap();
     let back: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v, back);
@@ -297,7 +302,7 @@ fn test_serde_null_serializes() {
 #[test]
 fn test_serde_array_to_json() {
     let v = Value::Array(vec![
-        Value::Int(1),
+        Value::Int32(1),
         Value::String("hello".to_string()),
         Value::Bool(false),
     ]);
@@ -309,7 +314,7 @@ fn test_serde_array_to_json() {
 #[test]
 fn test_serde_struct_to_json() {
     let mut s = IndexMap::new();
-    s.insert("id".to_string(), Value::Int(1));
+    s.insert("id".to_string(), Value::Int32(1));
     s.insert("name".to_string(), Value::String("Alice".to_string()));
     let v = Value::Struct(s);
     let json = serde_json::to_string(&v).unwrap();
@@ -321,8 +326,8 @@ fn test_serde_struct_to_json() {
 #[test]
 fn test_serde_map_to_json() {
     let mut m = IndexMap::new();
-    m.insert(Value::Int(1), Value::String("one".to_string()));
-    m.insert(Value::Int(2), Value::String("two".to_string()));
+    m.insert(Value::Int32(1), Value::String("one".to_string()));
+    m.insert(Value::Int32(2), Value::String("two".to_string()));
     let v = Value::Map(m);
     let json = serde_json::to_string(&v).unwrap();
     assert!(json.contains("\"1\""));
@@ -332,8 +337,8 @@ fn test_serde_map_to_json() {
 #[test]
 fn test_serde_nested_array_to_json() {
     let v = Value::Array(vec![
-        Value::Array(vec![Value::Int(1), Value::Int(2)]),
-        Value::Array(vec![Value::Int(3), Value::Int(4)]),
+        Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
+        Value::Array(vec![Value::Int32(3), Value::Int32(4)]),
     ]);
     let json = serde_json::to_string(&v).unwrap();
     assert!(json.contains("[[1,2],[3,4]]") || json.contains("[[1, 2], [3, 4]]"));
@@ -364,7 +369,7 @@ fn test_serde_empty_map_to_json() {
 
 #[test]
 fn test_serialize_int_as_json_number() {
-    let v = Value::Int(42);
+    let v = Value::Int32(42);
     let json = serde_json::to_string(&v).unwrap();
     assert_eq!(json, "42");
 }
@@ -392,7 +397,7 @@ fn test_serialize_null_as_json_null() {
 
 #[test]
 fn test_serialize_array_as_json_array() {
-    let v = Value::Array(vec![Value::Int(1), Value::Int(2)]);
+    let v = Value::Array(vec![Value::Int32(1), Value::Int32(2)]);
     let json = serde_json::to_string(&v).unwrap();
     assert_eq!(json, "[1,2]");
 }
@@ -400,7 +405,7 @@ fn test_serialize_array_as_json_array() {
 #[test]
 fn test_serialize_struct_as_json_object() {
     let mut s = IndexMap::new();
-    s.insert("a".to_string(), Value::Int(1));
+    s.insert("a".to_string(), Value::Int32(1));
     s.insert("b".to_string(), Value::String("x".to_string()));
     let v = Value::Struct(s);
     let json = serde_json::to_string(&v).unwrap();
@@ -412,8 +417,8 @@ fn test_serialize_struct_as_json_object() {
 #[test]
 fn test_serialize_map_keys_as_strings() {
     let mut m = IndexMap::new();
-    m.insert(Value::Int(1), Value::String("one".to_string()));
-    m.insert(Value::String("key".to_string()), Value::Int(42));
+    m.insert(Value::Int32(1), Value::String("one".to_string()));
+    m.insert(Value::String("key".to_string()), Value::Int32(42));
     let v = Value::Map(m);
     let json = serde_json::to_string(&v).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -423,7 +428,7 @@ fn test_serialize_map_keys_as_strings() {
 
 #[test]
 fn test_value_clone() {
-    let v = Value::Array(vec![Value::Int(1), Value::String("x".to_string())]);
+    let v = Value::Array(vec![Value::Int32(1), Value::String("x".to_string())]);
     let v2 = v.clone();
     assert_eq!(v, v2);
 }

@@ -1,5 +1,5 @@
 use tablec_core::core::project::project::Project;
-use tablec_core::core::project::meta::Meta;
+use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::table::table::Table;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
@@ -37,14 +37,14 @@ fn make_simple_project() -> Project {
             ],
             data: vec![
                 Row::from_vec(vec![
-                    ("id".to_string(), Value::Int(1)),
+                    ("id".to_string(), Value::Int32(1)),
                     ("name".to_string(), Value::String("Arthur".to_string())),
-                    ("level".to_string(), Value::Int(5)),
+                    ("level".to_string(), Value::Int32(5)),
                 ]),
                 Row::from_vec(vec![
-                    ("id".to_string(), Value::Int(2)),
+                    ("id".to_string(), Value::Int32(2)),
                     ("name".to_string(), Value::String("Lancelot".to_string())),
-                    ("level".to_string(), Value::Int(8)),
+                    ("level".to_string(), Value::Int32(8)),
                 ]),
             ],
             constraints: vec![],
@@ -55,8 +55,10 @@ fn make_simple_project() -> Project {
         name: "test_project".to_string(),
         meta: Meta {
             version: "1.0.0".to_string(),
-            hash: 12345,
+            hash: [0xab; 32],
             build_at: 1700000000,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables,
     }
@@ -128,8 +130,10 @@ fn test_json_export_empty_project() {
         name: "empty".to_string(),
         meta: Meta {
             version: "0.1.0".to_string(),
-            hash: 0,
+            hash: [0u8; 32],
             build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables: IndexMap::new(),
     };
@@ -168,8 +172,10 @@ fn test_msgpack_export_empty_project() {
         name: "empty".to_string(),
         meta: Meta {
             version: "0.1.0".to_string(),
-            hash: 0,
+            hash: [0u8; 32],
             build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
         },
         tables: IndexMap::new(),
     };
@@ -189,7 +195,7 @@ fn test_msgpack_export_multi_table() {
                 name: "x".to_string(), t: FieldType::Int32,
                 desc: "".to_string(), constraint: None, tags: vec![],
             }],
-            data: vec![Row::from_vec(vec![("x".to_string(), Value::Int(1))])],
+            data: vec![Row::from_vec(vec![("x".to_string(), Value::Int32(1))])],
             constraints: vec![],
         }),
         ("table_b".to_string(), Table {
@@ -205,7 +211,7 @@ fn test_msgpack_export_multi_table() {
 
     let project = Project {
         name: "multi".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables,
     };
 
@@ -228,14 +234,14 @@ fn test_json_export_all_value_types() {
             fields: vec![],
             data: vec![
                 Row::from_vec(vec![
-                    ("int_val".to_string(), Value::Int(42)),
-                    ("uint_val".to_string(), Value::Uint(100)),
-                    ("float_val".to_string(), Value::Float(3.14)),
+                    ("int_val".to_string(), Value::Int32(42)),
+                    ("uint_val".to_string(), Value::Uint32(100)),
+                    ("float_val".to_string(), Value::Float32(3.14)),
                     ("string_val".to_string(), Value::String("hello".to_string())),
                     ("bool_val".to_string(), Value::Bool(true)),
                     ("null_val".to_string(), Value::Null),
                     ("array_val".to_string(), Value::Array(vec![
-                        Value::Int(1), Value::Int(2),
+                        Value::Int32(1), Value::Int32(2),
                     ])),
                 ]),
             ],
@@ -245,7 +251,7 @@ fn test_json_export_all_value_types() {
 
     let project = Project {
         name: "types_test".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: 0, build_at: 0 },
+        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
         tables,
     };
 
@@ -257,7 +263,8 @@ fn test_json_export_all_value_types() {
 
     assert_eq!(row["int_val"], 42);
     assert_eq!(row["uint_val"], 100);
-    assert!((row["float_val"].as_f64().unwrap() - 3.14).abs() < 1e-10);
+    // Float32 precision is coarser than 1e-10 around 3.14 — use a wider bound.
+    assert!((row["float_val"].as_f64().unwrap() - 3.14).abs() < 1e-5);
     assert_eq!(row["string_val"], "hello");
     assert_eq!(row["bool_val"], true);
     assert!(row["null_val"].is_null());
@@ -265,31 +272,4 @@ fn test_json_export_all_value_types() {
 }
 
 // === legacy to_string/to_vec compatibility ===
-
-#[test]
-fn test_json_legacy_to_string() {
-    let tables = vec![Table {
-        name: "legacy".to_string(),
-        fields: vec![],
-        data: vec![],
-        constraints: vec![],
-    }];
-    let result = tablec_core::export::json::to_string(&tables, true);
-    assert!(result.is_ok());
-    let s = result.unwrap();
-    assert!(s.contains("legacy"));
-    assert!(s.contains("fields"));
-}
-
-#[test]
-fn test_msgpack_legacy_to_vec() {
-    let tables = vec![Table {
-        name: "legacy".to_string(),
-        fields: vec![],
-        data: vec![],
-        constraints: vec![],
-    }];
-    let result = tablec_core::export::msgpack::to_vec(&tables);
-    assert!(result.is_ok());
-    assert!(!result.unwrap().is_empty());
-}
+// (Legacy wrappers removed in c3; see brief step 8.)

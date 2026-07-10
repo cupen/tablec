@@ -21,9 +21,3 @@ impl Format for Msgpack {
         Ok(encoded)
     }
 }
-
-/// Legacy function for backward compatibility
-pub fn to_vec(tabs: &Vec<crate::core::table::table::Table>) -> Result<Vec<u8>, Box<dyn Error>> {
-    let encoded = rmp_serde::to_vec(tabs)?;
-    Ok(encoded)
-}

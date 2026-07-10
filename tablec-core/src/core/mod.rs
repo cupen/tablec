@@ -1,3 +1,4 @@
+pub mod diagnostic;
 pub mod table;
 pub mod parser;
 pub mod plugin;

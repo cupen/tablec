@@ -86,9 +86,9 @@ fn test_unique_single_field_pass() {
     let c = Constraint::from_str("@unique").unwrap();
     let fields = vec![make_field("id", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("id".to_string(), Value::Int(2))]),
-        Row::from_vec(vec![("id".to_string(), Value::Int(3))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(3))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -98,9 +98,9 @@ fn test_unique_single_field_fail() {
     let c = Constraint::from_str("@unique").unwrap();
     let fields = vec![make_field("id", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("id".to_string(), Value::Int(2))]),
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]), // duplicate
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]), // duplicate
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -110,8 +110,8 @@ fn test_unique_single_field_all_duplicate() {
     let c = Constraint::from_str("@unique").unwrap();
     let fields = vec![make_field("id", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -129,7 +129,7 @@ fn test_unique_single_row() {
     let c = Constraint::from_str("@unique").unwrap();
     let fields = vec![make_field("id", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
+        Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -165,16 +165,16 @@ fn test_unique_composite_pass() {
     ];
     let rows = vec![
         Row::from_vec(vec![
-            ("a".to_string(), Value::Int(1)),
-            ("b".to_string(), Value::Int(1)),
+            ("a".to_string(), Value::Int32(1)),
+            ("b".to_string(), Value::Int32(1)),
         ]),
         Row::from_vec(vec![
-            ("a".to_string(), Value::Int(1)),
-            ("b".to_string(), Value::Int(2)),
+            ("a".to_string(), Value::Int32(1)),
+            ("b".to_string(), Value::Int32(2)),
         ]),
         Row::from_vec(vec![
-            ("a".to_string(), Value::Int(2)),
-            ("b".to_string(), Value::Int(1)),
+            ("a".to_string(), Value::Int32(2)),
+            ("b".to_string(), Value::Int32(1)),
         ]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
@@ -189,12 +189,12 @@ fn test_unique_composite_fail() {
     ];
     let rows = vec![
         Row::from_vec(vec![
-            ("a".to_string(), Value::Int(1)),
-            ("b".to_string(), Value::Int(1)),
+            ("a".to_string(), Value::Int32(1)),
+            ("b".to_string(), Value::Int32(1)),
         ]),
         Row::from_vec(vec![
-            ("a".to_string(), Value::Int(1)),
-            ("b".to_string(), Value::Int(1)),
+            ("a".to_string(), Value::Int32(1)),
+            ("b".to_string(), Value::Int32(1)),
         ]),
     ];
     assert!(c.validate(&fields, &rows).is_err());
@@ -207,10 +207,10 @@ fn test_seq_default_step_pass() {
     let c = Constraint::from_str("@seq").unwrap();
     let fields = vec![make_field("seq", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(2))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(3))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(4))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(2))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(3))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(4))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -220,8 +220,8 @@ fn test_seq_default_step_fail() {
     let c = Constraint::from_str("@seq").unwrap();
     let fields = vec![make_field("seq", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(3))]), // skip 2
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(3))]), // skip 2
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -231,9 +231,9 @@ fn test_seq_custom_step() {
     let c = Constraint::from_str("@seq(2)").unwrap();
     let fields = vec![make_field("seq", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(3))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(5))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(3))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(5))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -243,8 +243,8 @@ fn test_seq_custom_step_fail() {
     let c = Constraint::from_str("@seq(2)").unwrap();
     let fields = vec![make_field("seq", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(2))]), // should be 3
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(2))]), // should be 3
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -254,9 +254,9 @@ fn test_seq_negative_step() {
     let c = Constraint::from_str("@seq(-1)").unwrap();
     let fields = vec![make_field("seq", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(0))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Int(-1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(0))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Int32(-1))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -266,8 +266,8 @@ fn test_seq_uint_field() {
     let c = Constraint::from_str("@seq").unwrap();
     let fields = vec![make_field("seq", FieldType::Uint32)];
     let rows = vec![
-        Row::from_vec(vec![("seq".to_string(), Value::Uint(1))]),
-        Row::from_vec(vec![("seq".to_string(), Value::Uint(2))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Uint32(1))]),
+        Row::from_vec(vec![("seq".to_string(), Value::Uint32(2))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -297,10 +297,10 @@ fn test_order_asc_pass() {
     let c = Constraint::from_str("@order(asc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(2))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(5))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(10))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(2))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(5))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(10))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -310,9 +310,9 @@ fn test_order_asc_fail() {
     let c = Constraint::from_str("@order(asc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(5))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(3))]), // violates asc
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(5))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(3))]), // violates asc
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -322,9 +322,9 @@ fn test_order_desc_pass() {
     let c = Constraint::from_str("@order(desc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(10))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(5))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(10))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(5))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -334,9 +334,9 @@ fn test_order_desc_fail() {
     let c = Constraint::from_str("@order(desc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(10))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(5))]), // violates desc
+        Row::from_vec(vec![("val".to_string(), Value::Int32(10))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(5))]), // violates desc
     ];
     assert!(c.validate(&fields, &rows).is_err());
 }
@@ -346,8 +346,8 @@ fn test_order_default_asc() {
     let c = Constraint::from_str("@order").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(2))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(2))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -357,9 +357,9 @@ fn test_order_float_values() {
     let c = Constraint::from_str("@order(asc)").unwrap();
     let fields = vec![make_field("val", FieldType::Float32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Float(1.0))]),
-        Row::from_vec(vec![("val".to_string(), Value::Float(2.5))]),
-        Row::from_vec(vec![("val".to_string(), Value::Float(3.0))]),
+        Row::from_vec(vec![("val".to_string(), Value::Float32(1.0))]),
+        Row::from_vec(vec![("val".to_string(), Value::Float32(2.5))]),
+        Row::from_vec(vec![("val".to_string(), Value::Float32(3.0))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -369,9 +369,9 @@ fn test_order_equal_values_pass() {
     let c = Constraint::from_str("@order(asc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(1))]),
-        Row::from_vec(vec![("val".to_string(), Value::Int(2))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(1))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(2))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -389,7 +389,7 @@ fn test_order_single_row() {
     let c = Constraint::from_str("@order(asc)").unwrap();
     let fields = vec![make_field("val", FieldType::Int32)];
     let rows = vec![
-        Row::from_vec(vec![("val".to_string(), Value::Int(42))]),
+        Row::from_vec(vec![("val".to_string(), Value::Int32(42))]),
     ];
     assert!(c.validate(&fields, &rows).is_ok());
 }
@@ -418,12 +418,12 @@ fn test_validator_all_pass() {
         ],
         data: vec![
             Row::from_vec(vec![
-                ("id".to_string(), Value::Int(1)),
-                ("seq".to_string(), Value::Int(1)),
+                ("id".to_string(), Value::Int32(1)),
+                ("seq".to_string(), Value::Int32(1)),
             ]),
             Row::from_vec(vec![
-                ("id".to_string(), Value::Int(2)),
-                ("seq".to_string(), Value::Int(2)),
+                ("id".to_string(), Value::Int32(2)),
+                ("seq".to_string(), Value::Int32(2)),
             ]),
         ],
         constraints: vec![],
@@ -445,8 +445,8 @@ fn test_validator_one_fails() {
             },
         ],
         data: vec![
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
         ],
         constraints: vec![],
     };
@@ -480,12 +480,12 @@ fn test_validator_unknown_constraint_function() {
                 name: "id".to_string(),
                 t: FieldType::Int32,
                 desc: "".to_string(),
-                constraint: Some(Constraint { func: "nonexistent".to_string(), args: vec![] }),
+                constraint: Some(Constraint { func: "nonexistent".to_string(), args: vec![], location: Default::default() }),
                 tags: vec![],
             },
         ],
         data: vec![
-            Row::from_vec(vec![("id".to_string(), Value::Int(1))]),
+            Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
         ],
         constraints: vec![],
     };

@@ -13,6 +13,7 @@ glob = "0.3"
 # prost = "0.12.6"
 indexmap = { version = "2.10.0", features = ["serde"] }
 rand = "0.8.5"
+blake3 = "1"
 
 [dev-dependencies]
 pretty_assertions = "1"
@@ -22,6 +23,18 @@ rust_xlsxwriter = "0.90"
 [[bench]]
 name = "basic_bench"
 harness = false
+
+[[example]]
+name = "build_bad_int_range"
+path = "tests/fixtures/error_cases/build_bad_int_range.rs"
+
+[[example]]
+name = "build_bad_struct_field"
+path = "tests/fixtures/error_cases/build_bad_struct_field.rs"
+
+[[example]]
+name = "build_bad_unique"
+path = "tests/fixtures/error_cases/build_bad_unique.rs"
 
 # [build-dependencies]
 # prost-build = "0.14.1"

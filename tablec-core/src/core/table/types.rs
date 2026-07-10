@@ -2,18 +2,12 @@ use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
-    // Basic types
-    Int,
-    Uint,
-    Float,
-    String,
-    Bool,
-
-    // Complex types
+    Int8, Int16, Int32, Int64,
+    Uint8, Uint16, Uint32, Uint64,
+    Float32, Float64,
+    String, Bool,
     Array(Box<Type>),
     Map(Box<Type>, Box<Type>),
     Struct(HashMap<String, Type>),
-
-    // Special type for untyped or unknown fields
     Any,
 }
