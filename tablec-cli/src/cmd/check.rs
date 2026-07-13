@@ -2,7 +2,7 @@ use clap::Args;
 use std::error::Error;
 use std::path::PathBuf;
 use tablec_core::core::config::{self, Config};
-use tablec_core::core::table::{table::read_excel, validator::validate_table};
+use tablec_core::core::table::{table::read_excel, constraint::ConstraintValidator};
 
 #[derive(Args, Debug)]
 pub struct CheckCommand {
@@ -73,7 +73,7 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
             Ok(tables) => {
                 for table in tables {
                     println!("  Checking sheet: {}", table.name);
-                    match validate_table(&table) {
+                    match ConstraintValidator::validate_table(&table) {
                         Ok(_) => {
                             if c.verbose {
                                 println!("    OK");
