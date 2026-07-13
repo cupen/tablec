@@ -30,7 +30,7 @@ PR #1 解了"运行时正确性"债，但留下了 4 处二级改进：僵尸代
 | validator | 保留 `ConstraintValidator`，删除 `validator.rs`，删除 `numeric_i64` 复本 |
 | Value 抽象 | 引入私有 `Numeric` 类型，trait impl 不变对外行为 |
 | CLI 错误 | 新增 cli 内部 `diag_render` 模块，消除 4 处复制粘贴 |
-| Float 比较 | 维持 EPSILON；doc comment 写明"exact match by IEEE bits"；不改语义 |
+| Float 比较 | 改用 bitwise exact（`a.to_bits() == b.to_bits()`）；doc comment 写明设计选择 |
 
 ---
 
@@ -180,18 +180,24 @@ impl Serialize for Numeric {
 
 ### 4.3 PartialEq 对 Float 的处理
 
-维持现 `EPSILON` 比较。在 `value.rs` 内 `impl PartialEq for Value` 上方加 doc comment：
+改用 **bitwise exact match**（`a.to_bits() == b.to_bits()`），不再使用 `EPSILON` 近似比较。
 
-```rust
-/// Float 比较用 `(a - b).abs() < f64::EPSILON`（**注意**：`EPSILON` 是最小正
-/// 正常浮点数相对差，不是绝对误差；NaN 因 IEEE 而自动不等；inf 自动不等）。
-/// 若要求"按位等价"行为，请改用 `a.to_bits() == b.to_bits()`。
-///
-/// 现策略保持向后兼容；不在本 spec 内改动比较语义。
-impl PartialEq for Value { ... }
-```
+设计理由：
 
-不在 spec 里改实现，避免引入新行为回归。
+- `EPSILON` 是最小正正常浮点数相对差，不是绝对误差；用它做相等比较是语义混淆
+- IEEE 754 浮点有明确的位表示，按位比较是可预测、可推理的
+- 跨 crate 序列化/反序列化时（JSON / msgpack），位级表示是稳定不变的
+- 用户若需要容差比较，自己加 wrapper（`approx` crate 等），不该内建在 `PartialEq` 里
+
+在 `value.rs` 内 `impl PartialEq for Value` 上方加 doc comment 写明：
+
+- `NaN != NaN`（IEEE 754，by design）
+- `+0.0 == -0.0` 在 `to_bits()` 下为 `false`（位不同），这是按位比较的固有性质
+- 不再使用 `EPSILON` 近似
+
+impl 通过 `Numeric::eq`（按位）实现。
+
+这是显式行为变更：本 spec 范围内 breaking change，不保持向后兼容。
 
 ### 4.4 不动
 
@@ -334,7 +340,7 @@ cargo run -p tablec-cli -- check path/to/invalid/xlsx   # 应见 error 行
 | c1 grep 漏掉 caller | 编译通过但运行时 panic | grep 加 pattern `Plugin\|plugin\|plugin_manager`，把 `--include='*.rs'` `--include='*.toml'` 全勾；找不到再 `find` 二次人工 |
 | c2 `ConstraintValidator::validate_table` 签名 vs `validator::validate_table` 不兼容 | check.rs 编译失败 | commit 前在本地编译验证 |
 | c3 `to_numeric`/`from_numeric` 没覆盖 Null/Map 等非 numeric | 测试 fail | `to_numeric` 返回 `Option<Numeric>`，trait impl 内显式 fallback |
-| c3 float 比较语义变化 | 既有测试 fail | 维持 EPSILON 实现，doc comment 写明限制 |
+| c3 float 比较语义变化（bitwise 替代 EPSILON） | 既有测试 fail | 显式 breaking change；新增 `numeric_helper_round_trip` 测试覆盖新语义；`cross_width_partial_ord_promotes` / `value_size_is_sixteen_variants` 仍绿 |
 | c4 输出格式破坏下游 snapshot | testsuite 挂 | 本 spec 不动 wire format，只动 stderr 文案；testsuite 不应对 stderr 文案做 byte-equal |
 | c4 build_to_string 行为变化 | Python 链路挂 | 维持 stderr 写一行 + Err；不改返回值 |
 
@@ -348,7 +354,7 @@ cargo run -p tablec-cli -- check path/to/invalid/xlsx   # 应见 error 行
 | validator 留谁 | `ConstraintValidator` (constraint.rs) | 反向：把 `ConstraintValidator` 并入 `validator.rs` |
 | `numeric_i64` 留谁 | 与 `ConstraintValidator` 同文件 | 抽到新文件 `utils.rs` |
 | Value 抽象层级 | 私有 `Numeric` enum | macro、trait 对象、外部 crate |
-| Float 比较 | 维持 EPSILON + doc comment | 改 `to_bits()`，引入新语义 |
+| Float 比较 | **bitwise exact (`a.to_bits() == b.to_bits()`)** | EPSILON 维持向后兼容（被否） |
 | `diag_render` crate | `tablec-cli` 内部模块 | 进 `tablec-core` 让 binding 复用 |
 | 输出格式（cli） | severity 前缀 + 复用 core Display | 自定义 `fmt::Display` 直写 |
 | ANSI color | 不在本 spec | 下一 spec 单独 `owo_colors`/`yansi` |
