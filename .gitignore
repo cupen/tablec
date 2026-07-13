@@ -31,3 +31,7 @@ Cargo.lock
 *.db
 .beads-credential-key
 .worktrees/
+
+# Claude / superpowers tooling metadata
+.claude/
+.superpowers/

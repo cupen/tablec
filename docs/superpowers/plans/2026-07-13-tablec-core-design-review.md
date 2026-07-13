@@ -464,33 +464,6 @@ Replace the `impl PartialOrd for Value` block (currently lines 142-176) with:
 ```rust
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use Value::*;
-        if let (Some(a), Some(b)) = (self.to_numeric(), other.to_numeric()) {
-            // Cross-width numeric via f64 widening (parse-time range-checked,
-            // per spec §4.3). Same-width match goes through PartialOrd on Numeric.
-            if a == b { return Some(Ordering::Equal); }
-            return a.partial_cmp(&b).or_else(|| {
-                // Mixed families (e.g., u64 > f64 max): partial_cmp gives None.
-                // We deliberately return None rather than coercing.
-                None
-            });
-        }
-        // Non-numeric comparisons
-        match (self, other) {
-            (String(a), String(b)) => a.partial_cmp(b),
-            _ => None,
-        }
-    }
-}
-```
-
-(Note: the previous impl branched many cases per numeric width. The new impl discriminates "both numeric" vs "non-numeric" once. Behavior for numeric cross-width comparison follows `Numeric::partial_cmp`, which we defined as same-width-only — partial_cmp returns `None` for cross-width numerics, matching the previous cross-family fallback. **However**, this is a semantic narrowing from the spec version that promoted via f64. Spec §4.3 prescribes f64-promotion; implement it instead.)
-
-The correct version (matching spec) is:
-
-```rust
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if let (Some(a), Some(b)) = (self.to_numeric(), other.to_numeric()) {
             // Same-width
             if a == b { return Some(Ordering::Equal); }
@@ -895,11 +868,14 @@ Run:
 ```bash
 cd /home/bot/workbench/repos/tablec && cargo test -p tablec-cli --lib 2>&1 | tail -30
 ```
-Expected: 4 pass, 3 fail:
+Expected: 2 pass, 5 fail:
+- `diag_exit_code_only_warnings_returns_0` — passes (placeholder returns 0)
+- `diag_exit_code_empty_returns_0` — passes (placeholder returns 0)
 - `render_diags_writes_one_line_per_diag` — fails (0 lines vs 2)
 - `render_diags_includes_file` — fails (no path)
+- `render_diags_skips_missing_file_gracefully` — fails (no message written)
+- `diag_exit_code_first_error_returns_1` — fails (placeholder returns 0, expected 1)
 - `diag_summary_counts_severity` — fails (empty string vs "2 errors, 1 warning")
-The exit code tests pass trivially.
 
 - [ ] **Step 4: Implement `render_diags`**
 
