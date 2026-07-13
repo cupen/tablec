@@ -93,22 +93,6 @@ impl Value {
             _ => None,
         }
     }
-
-    #[allow(dead_code)] // crate-private helper kept for API symmetry with to_numeric (brief Task 3)
-    fn from_numeric(n: Numeric) -> Self {
-        match n {
-            Numeric::I8(v)  => Value::Int8(v),
-            Numeric::I16(v) => Value::Int16(v),
-            Numeric::I32(v) => Value::Int32(v),
-            Numeric::I64(v) => Value::Int64(v),
-            Numeric::U8(v)  => Value::Uint8(v),
-            Numeric::U16(v) => Value::Uint16(v),
-            Numeric::U32(v) => Value::Uint32(v),
-            Numeric::U64(v) => Value::Uint64(v),
-            Numeric::F32(v) => Value::Float32(v),
-            Numeric::F64(v) => Value::Float64(v),
-        }
-    }
 }
 
 impl Serialize for Value {
@@ -166,22 +150,16 @@ impl Serialize for Numeric {
     }
 }
 
-/// Float comparisons are bitwise exact via Numeric's `==`. Per spec §4.3
-/// we deliberately do NOT use `f32::EPSILON` / `f64::EPSILON`: those are
-/// minimum representable differences, not useful error tolerances.
-/// Consequences:
+/// Float comparisons are bitwise exact via `Numeric::eq` (calls `to_bits()`).
+/// Per spec §4.3 we deliberately do NOT use `f32::EPSILON` / `f64::EPSILON`:
+/// those are minimum representable differences, not useful error tolerances.
+///
+/// Consequences (all by design):
 ///   - `NaN != NaN` (IEEE 754)
-///   - `inf != inf` (treated as distinct values, since inf bits match,
-///     `==` returns `true` here; but if your NaN/coercion semantics
-///     matter, check the spec verbatim before changing)
+///   - `+0.0 != -0.0` (bit representations differ)
+///   - finite floats compare by their exact bit pattern
 ///
 /// If you need tolerance-based equality, wrap with `approx` or similar.
-///
-/// Note: this changes behavior vs the previous `(a - b).abs() < EPSILON`
-/// impl for ints like `f64::NAN` and very-close-but-not-equal floats.
-/// Tests covered: existing `value_size_is_sixteen_variants`,
-/// `cross_width_partial_ord_promotes`, `serialize_each_numeric_variant`,
-/// `numeric_helper_round_trip` (this PR).
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         // Numeric: delegate to Numeric's PartialEq (cross-width returns false,
