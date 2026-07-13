@@ -13,3 +13,8 @@ calamine = "0.25.0"
 tokio = { version = "1", features = ["full"] }
 rand = "0.9.2"
 glob = "0.3"
+
+[[bin]]
+name = "tablec"
+path = "src/main.rs"
+
