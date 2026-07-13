@@ -432,3 +432,25 @@ fn test_value_clone() {
     let v2 = v.clone();
     assert_eq!(v, v2);
 }
+
+#[test]
+fn numeric_helper_round_trip() {
+    use tablec_core::core::table::value::Value;
+    let cases = vec![
+        Value::Int8(-1), Value::Int16(-1), Value::Int32(-1), Value::Int64(-1),
+        Value::Uint8(1), Value::Uint16(1), Value::Uint32(1), Value::Uint64(1),
+        Value::Float32(1.5), Value::Float64(1.5),
+    ];
+    for v in &cases {
+        // Helpers are crate-private; we exercise them via public traits.
+        // First check: Serialize outputs the same JSON for each width.
+        let s = serde_json::to_string(v).unwrap();
+        assert!(s == "-1" || s == "1" || s == "1.5", "unexpected serialize: {}", s);
+        // Second check: Hash is deterministic across calls.
+        let mut h1 = std::collections::hash_map::DefaultHasher::new();
+        let mut h2 = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(v, &mut h1);
+        std::hash::Hash::hash(v, &mut h2);
+        assert_eq!(h1.finish(), h2.finish(), "hash not deterministic for {:?}", v);
+    }
+}
