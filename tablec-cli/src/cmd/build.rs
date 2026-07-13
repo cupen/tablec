@@ -2,10 +2,34 @@ use clap::Args;
 use std::error::Error;
 use std::io;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use tablec_core::core::config::{self, Config};
+use tablec_core::core::table::constraint::ConstraintValidator;
 use tablec_core::core::table::table::read_excel;
 use tablec_core::core::project::project::Project;
 use tablec_core::export::{Format, Json, Msgpack};
+
+/// Format a `Duration` as a human-readable ms/s string.
+fn fmt_duration(d: Duration) -> String {
+    let ms = d.as_secs_f64() * 1000.0;
+    if ms < 10.0 {
+        format!("{:.2}ms", ms)
+    } else if ms < 100.0 {
+        format!("{:.1}ms", ms)
+    } else if ms < 10_000.0 {
+        format!("{:.0}ms", ms)
+    } else {
+        format!("{:.1}s", ms / 1000.0)
+    }
+}
+
+/// Validate a single table, printing any diagnostics to stderr. Returns
+/// silently on success. Validation never aborts the build.
+fn validate_table_silent(table: &tablec_core::core::table::table::Table) {
+    if let Err(errs) = ConstraintValidator::validate_table(table) {
+        let _ = crate::diag_render::render_diags(&errs, &mut io::stderr().lock());
+    }
+}
 
 #[derive(Args, Debug)]
 pub struct BuildCommand {
@@ -114,6 +138,9 @@ impl BuildCommand {
         format: &str,
         include_fields: bool,
     ) -> Result<(), Box<dyn Error>> {
+        let total_start = Instant::now();
+
+        let parse_start = Instant::now();
         let tables = match read_excel(input) {
             Ok(t) => t,
             Err(errs) => {
@@ -121,6 +148,20 @@ impl BuildCommand {
                 return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
             }
         };
+        let parse_elapsed = parse_start.elapsed();
+        let table_count = tables.len();
+
+        for table in &tables {
+            let v_start = Instant::now();
+            validate_table_silent(table);
+            let v_elapsed = v_start.elapsed();
+            eprintln!(
+                "{}/{}: {} rows (parse={}, validate={})",
+                input, table.name, table.data.len(),
+                fmt_duration(parse_elapsed), fmt_duration(v_elapsed),
+            );
+        }
+
         let project = Project::from_tables("unnamed".to_string(), tables);
 
         match format {
@@ -137,6 +178,9 @@ impl BuildCommand {
                 return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
             }
         }
+
+        let total_elapsed = total_start.elapsed();
+        eprintln!("Total: {} tables, {}", table_count, fmt_duration(total_elapsed));
         Ok(())
     }
 
@@ -147,9 +191,15 @@ impl BuildCommand {
         format: &str,
         include_fields: bool,
     ) -> Result<(), Box<dyn Error>> {
-        // Merge all tables from all files
+        let total_start = Instant::now();
+
+        // Merge all tables from all files; track per-file parse time and
+        // emit per-table validate line as we go (before Project::from_tables
+        // collapses duplicates by name).
         let mut all_tables = Vec::new();
+        let mut total_table_count = 0;
         for file_path in files {
+            let parse_start = Instant::now();
             let tables = match read_excel(file_path.to_str().unwrap()) {
                 Ok(t) => t,
                 Err(errs) => {
@@ -157,6 +207,21 @@ impl BuildCommand {
                     return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
                 }
             };
+            let parse_elapsed = parse_start.elapsed();
+            let file_str = file_path.to_string_lossy();
+
+            for table in &tables {
+                let v_start = Instant::now();
+                validate_table_silent(table);
+                let v_elapsed = v_start.elapsed();
+                eprintln!(
+                    "{}/{}: {} rows (parse={}, validate={})",
+                    file_str, table.name, table.data.len(),
+                    fmt_duration(parse_elapsed), fmt_duration(v_elapsed),
+                );
+            }
+
+            total_table_count += tables.len();
             all_tables.extend(tables);
         }
 
@@ -179,6 +244,9 @@ impl BuildCommand {
                 return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
             }
         }
+
+        let total_elapsed = total_start.elapsed();
+        eprintln!("Total: {} tables, {}", total_table_count, fmt_duration(total_elapsed));
         Ok(())
     }
 }
@@ -206,5 +274,43 @@ pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> 
         }
         // Other formats could be added here if needed.
         _ => Err(format!("Unsupported format '{}'. Use 'json' or 'json-pretty'.", format).into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_duration;
+    use std::time::Duration;
+
+    #[test]
+    fn fmt_duration_sub_millisecond() {
+        let s = fmt_duration(Duration::from_micros(500));
+        assert!(s.ends_with("ms"), "got: {}", s);
+        // 0.5ms — should be 2 decimal places
+        assert!(s.starts_with("0.5"), "got: {}", s);
+    }
+
+    #[test]
+    fn fmt_duration_one_digit_ms() {
+        let s = fmt_duration(Duration::from_micros(2_400));
+        assert_eq!(s, "2.40ms");
+    }
+
+    #[test]
+    fn fmt_duration_two_digit_ms() {
+        let s = fmt_duration(Duration::from_micros(45_000));
+        assert_eq!(s, "45.0ms");
+    }
+
+    #[test]
+    fn fmt_duration_three_digit_ms() {
+        let s = fmt_duration(Duration::from_micros(250_000));
+        assert_eq!(s, "250ms");
+    }
+
+    #[test]
+    fn fmt_duration_seconds() {
+        let s = fmt_duration(Duration::from_micros(12_500_000));
+        assert_eq!(s, "12.5s");
     }
 }
