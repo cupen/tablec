@@ -1,5 +1,6 @@
 use clap::Args;
 use std::error::Error;
+use std::io;
 use std::path::PathBuf;
 use tablec_core::core::config::{self, Config};
 use tablec_core::core::table::table::read_excel;
@@ -116,9 +117,8 @@ impl BuildCommand {
         let tables = match read_excel(input) {
             Ok(t) => t,
             Err(errs) => {
-                let n = errs.len();
-                for d in errs { eprintln!("{}", d); }
-                return Err(format!("read_excel failed with {} diagnostics", n).into());
+                crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
+                return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
             }
         };
         let project = Project::from_tables("unnamed".to_string(), tables);
@@ -150,9 +150,8 @@ impl BuildCommand {
             let tables = match read_excel(file_path.to_str().unwrap()) {
                 Ok(t) => t,
                 Err(errs) => {
-                    let n = errs.len();
-                    for d in errs { eprintln!("{}", d); }
-                    return Err(format!("read_excel failed with {} diagnostics", n).into());
+                    crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
+                    return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
                 }
             };
             all_tables.extend(tables);
@@ -182,9 +181,8 @@ pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> 
     let tables = match read_excel(input_path) {
         Ok(t) => t,
         Err(errs) => {
-            let n = errs.len();
-            for d in errs { eprintln!("{}", d); }
-            return Err(format!("read_excel failed with {} diagnostics", n).into());
+            crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
+            return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
         }
     };
     let project = Project::from_tables("unnamed".to_string(), tables);

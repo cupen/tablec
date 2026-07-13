@@ -90,9 +90,7 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
             }
             Err(errs) => {
                 total_errors += errs.len();
-                for d in errs {
-                    eprintln!("  Error: {}", d);
-                }
+                crate::diag_render::render_diags(&errs, &mut std::io::stderr().lock())?;
             }
         }
     }
