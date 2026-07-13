@@ -21,7 +21,7 @@ pub struct BuildCommand {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Export format: json | msgpack
+    /// Export format: json (minified) | json-pretty (indented) | msgpack
     #[arg(long)]
     pub format: Option<String>,
 
@@ -75,7 +75,7 @@ impl BuildCommand {
                     format!("{}/{}.{}",
                         cfg.export.output_dir,
                         cfg.project.name,
-                        if format == "json" { "json" } else { "msgpack" }
+                        if format == "msgpack" { "msgpack" } else { "json" }
                     )
                 });
                 self.build_single_file(&input_path, &output, &format, include_fields)?;
@@ -85,7 +85,7 @@ impl BuildCommand {
                     format!("{}/{}.{}",
                         cfg.export.output_dir,
                         cfg.project.name,
-                        if format == "json" { "json" } else { "msgpack" }
+                        if format == "msgpack" { "msgpack" } else { "json" }
                     )
                 });
                 self.build_merged_files(&excel_files, &output, &format, include_fields)?;
@@ -125,13 +125,16 @@ impl BuildCommand {
 
         match format {
             "json" => {
+                Json { pretty: false, include_fields }.export(&project, output)?;
+            }
+            "json-pretty" => {
                 Json { pretty: true, include_fields }.export(&project, output)?;
             }
             "msgpack" => {
                 Msgpack.export(&project, output)?;
             }
             _ => {
-                return Err(format!("Unsupported format '{}'.", format).into());
+                return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
             }
         }
         Ok(())
@@ -161,6 +164,10 @@ impl BuildCommand {
 
         match format {
             "json" => {
+                Json { pretty: false, include_fields }.export(&project, output)?;
+                println!("Merged {} tables into {}", project.tables.len(), output);
+            }
+            "json-pretty" => {
                 Json { pretty: true, include_fields }.export(&project, output)?;
                 println!("Merged {} tables into {}", project.tables.len(), output);
             }
@@ -169,7 +176,7 @@ impl BuildCommand {
                 println!("Merged tables into {}", output);
             }
             _ => {
-                return Err(format!("Unsupported format '{}'.", format).into());
+                return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
             }
         }
         Ok(())
@@ -188,11 +195,16 @@ pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> 
     let project = Project::from_tables("unnamed".to_string(), tables);
     match format {
         "json" => {
+            let json = Json { pretty: false, include_fields };
+            let bytes = json.to_vec(&project)?;
+            Ok(String::from_utf8(bytes)?)
+        }
+        "json-pretty" => {
             let json = Json { pretty: true, include_fields };
             let bytes = json.to_vec(&project)?;
             Ok(String::from_utf8(bytes)?)
         }
         // Other formats could be added here if needed.
-        _ => Err(format!("Unsupported format '{}'.", format).into()),
+        _ => Err(format!("Unsupported format '{}'. Use 'json' or 'json-pretty'.", format).into()),
     }
 }
