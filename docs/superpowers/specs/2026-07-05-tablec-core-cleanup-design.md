@@ -513,7 +513,6 @@ CLI 的错误打印不是本 spec 的范围,但 read_excel 改 `Result<_, Vec<Di
 ### 9.3 已知后续 spec
 
 - **tablec-cli 错误呈现层**:Diagnostic → 漂亮打印、退出码
-- **plugin 模块处置**:删除或下沉到 examples
 - **binding-python Value 同步升级**(本 spec c3.1 commit 包含最小改动,完整升级另起 spec)
 
 ---
