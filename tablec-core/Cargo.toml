@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 calamine = "0.25.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.122"
+serde_json = { version = "1.0.122", features = ["preserve_order"] }
 rmp-serde = "1.1.2"
 toml = "0.8"
 glob = "0.3"
