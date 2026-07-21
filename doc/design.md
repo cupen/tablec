@@ -86,18 +86,37 @@ or
 
 ## Constraint 
 是对字段类型的额外约束，文法为 **`@func(arg ...)`**.  
+参数可以是裸标识符或 `"带引号"` 的字符串,引号内允许保留空白/逗号/转义符 (`\"`、`\\`).
 
-1. @unique(field...) 表示唯一
-    * @unique  当前字段唯一(默认)
-    * @unique(name1, name2) 复合字段唯一
-2. @seq(step)  表示序列
-    * @seq     有序递增(默认) 1,2,3,4,5,6,7...
-    * @seq(2)  有序递增 1,3,5,7,9,11,13...
-    * @seq(-1) 有序递减  
-3. @order(asc|desc) 表示趋势有序
-    * @order       从小到大(默认)
-    * @order(asc)  从小到大
-    * @order(desc) 从大到小
+围绕"手填容易出错"的目标,目前提供 **14 个具名约束**:
+
+### 单格级 (字段级)
+
+1. `@notnull` 当前 cell 不能为空字符串 (NULL).
+2. `@min(n)` / `@max(n)` 单边整数界. 闭区间 `[lo, hi]` 叠加 `@min(lo)` + `@max(hi)`.
+3. `@oneof(v1, v2, ...)` 取值必须落在枚举中(字符串或整数). 推荐 `"x"` 引号包裹.
+4. `@maxlen(n)` 字符串字符数上限(UTF-8 chars). 实际写超长字符串是更常见的错填,故只保留上界.
+5. `@pattern("regex")` 字符串需匹配正则. 字面量必须 `"..."` 引号.
+
+### 行内跨字段 (表级)
+
+1. `@eq(host, other)` 当前行 host 字段值等于 other 字段.
+2. `@gt(host, other)` / `@lt(host, other)` 严格整数比较;`@gte`/`@lte`/`@neq` 故意未保留,`≥` 可用 `@gt` 错位或 `@eq` 表达.
+
+### 表内跨行 (字段级或表级)
+
+1. `@unique` / `@unique(a, b)` **SQL 风格**:空 / NULL cell 不参与唯一比较.
+2. `@id` / `@id(a, b)` 主键:NOT NULL + `@unique` 复合.
+3. `@seq` / `@seq(step)` 序列:起点 1, 步长 1 或给定 step;只支持这两种形式.
+4. `@order` / `@order(asc)` / `@order(desc)` 单字段方向校验.
+
+### 跨表引用 (项目级,通过 `validate_project`)
+
+1. `@ref("Other.col")` 字段级, host = 字段自身.
+2. `@ref(host, "Other.col")` 表级, host 由第一个参数指定.
+3. 空 / NULL cell 自动跳过 (SQL 外键可空),叠加 `@notnull` 强制非空.
+
+`@no_ref` / `@neq` / `@gte` / `@lte` / `@order(primary, secondary)` / `@seq(start, step)` / `@sum_eq(...)` / `@count_*` / `@minlen` / `@len` / `@range` 均为精简前候选,合并到以上 14 个中或移除.
 
 
 ## 代码工程
