@@ -32,6 +32,13 @@ pub enum DiagnosticCode {
     ConstraintOrderViolation,
     ConstraintFieldMissing,
     ConstraintCompositeMissing,
+    ConstraintValueViolation,
+    ConstraintNotInSet,
+    ConstraintPatternMismatch,
+    ConstraintNullNotAllowed,
+    ConstraintCrossTableMissingTable,
+    ConstraintForeignKeyViolation,
+    ConstraintCrossFieldMissingColumn,
     Other,
 }
 
@@ -125,9 +132,16 @@ mod tests {
             DiagnosticCode::ConstraintOrderViolation,
             DiagnosticCode::ConstraintFieldMissing,
             DiagnosticCode::ConstraintCompositeMissing,
+            DiagnosticCode::ConstraintValueViolation,
+            DiagnosticCode::ConstraintNotInSet,
+            DiagnosticCode::ConstraintPatternMismatch,
+            DiagnosticCode::ConstraintNullNotAllowed,
+            DiagnosticCode::ConstraintCrossTableMissingTable,
+            DiagnosticCode::ConstraintForeignKeyViolation,
+            DiagnosticCode::ConstraintCrossFieldMissingColumn,
             DiagnosticCode::Other,
         ];
         // Intentionally asserts total variants — change ONLY when adding/removing a code.
-        assert_eq!(codes.len(), 18);
+        assert_eq!(codes.len(), 25);
     }
 }
