@@ -139,20 +139,14 @@ impl Constraint {
 
     pub fn to_diagnostic(&self, msg: &str) -> Diagnostic {
         let code = match self.func.as_str() {
-            // Legacy
             "unique" => DiagnosticCode::ConstraintDuplicate,
             "seq"    => DiagnosticCode::ConstraintSequenceBroken,
             "order"  => DiagnosticCode::ConstraintOrderViolation,
-            // Layer 1
-            "notnull" => DiagnosticCode::ConstraintNullNotAllowed,
-            "min" | "max" | "minlen" | "maxlen" | "len" => DiagnosticCode::ConstraintValueViolation,
+            "nullable" => DiagnosticCode::ConstraintNullNotAllowed,
+            "range" | "maxlen" => DiagnosticCode::ConstraintValueViolation,
             "oneof"   => DiagnosticCode::ConstraintNotInSet,
             "pattern" => DiagnosticCode::ConstraintPatternMismatch,
-            // Layer 3
-            "id" => DiagnosticCode::ConstraintNullNotAllowed,
-            // Layer 4
             "ref"    => DiagnosticCode::ConstraintForeignKeyViolation,
-            // Catch-all (still used during early parse-time)
             _        => DiagnosticCode::ConstraintUnknown,
         };
         let sig = if self.args.is_empty() {
@@ -200,19 +194,12 @@ impl Constraint {
             "unique" => self.validate_unique(fields, rows),
             "seq" => self.validate_sequence(fields, rows),
             "order" => self.validate_order(fields, rows),
-            // Layer 1: single-cell constraints
-            "notnull" => self.validate_notnull(fields, rows),
-            "min"     => self.validate_min(fields, rows),
-            "max"     => self.validate_max(fields, rows),
-            "oneof"   => self.validate_oneof(fields, rows),
-            "maxlen"  => self.validate_maxlen(fields, rows),
-            "pattern" => self.validate_pattern(fields, rows),
-            // Layer 2: intra-row cross-field
-            "eq"      => self.validate_cross_cmp(fields, rows, CrossCmp::Eq),
-            "gt"      => self.validate_cross_cmp(fields, rows, CrossCmp::Gt),
-            "lt"      => self.validate_cross_cmp(fields, rows, CrossCmp::Lt),
-            // Layer 3: intra-table extensions
-            "id"      => self.validate_id(fields, rows),
+            // Field-level single-cell constraints
+            "nullable" => self.validate_nullable(fields, rows),
+            "range"    => self.validate_range(fields, rows),
+            "oneof"    => self.validate_oneof(fields, rows),
+            "maxlen"   => self.validate_maxlen(fields, rows),
+            "pattern"  => self.validate_pattern(fields, rows),
             _ => Err(format!("Unknown constraint function: {}", self.func)),
         }
     }
@@ -230,8 +217,8 @@ impl Constraint {
         };
 
         // SQL-style semantics: NULL / empty-cell values are NOT compared
-        // against each other for uniqueness. Pair @notnull (or @id) when
-        // you actually want to forbid nulls.
+        // against each other for uniqueness. Default-not-null at schema level
+        // (overridable by `@nullable`) decides whether empties are allowed.
         let mut seen_values: HashSet<Vec<Value>> = HashSet::new();
 
         for (row_index, row) in rows.iter().enumerate() {
@@ -353,56 +340,28 @@ impl Constraint {
         }
     }
 
-    fn validate_notnull(&self, fields: &[Field], rows: &[Row]) -> Result<(), String> {
-        if !self.args.is_empty() {
-            return Err("@notnull takes no arguments".to_string());
-        }
-        let field_name = self.require_single_field(fields, "notnull")?;
-        for (idx, row) in rows.iter().enumerate() {
-            let present = row.get_field(&field_name);
-            let empty = match present {
-                None => true,
-                Some(Value::String(s)) => s.is_empty(),
-                Some(Value::Null) => true,
-                _ => false,
-            };
-            if empty {
-                return Err(format!(
-                    "field '{}' must not be empty (row {})", field_name, idx + 1,
-                ));
-            }
-        }
+    fn validate_nullable(&self, _fields: &[Field], _rows: &[Row]) -> Result<(), String> {
+        // `@nullable` is a marker flag only; the actual non-empty semantics
+        // is enforced in `ConstraintValidator::validate_table` as a pre-pass.
         Ok(())
     }
 
-    fn validate_min(&self, fields: &[Field], rows: &[Row]) -> Result<(), String> {
-        let field_name = self.require_single_field(fields, "min")?;
-        let lo = self.require_int_arg(0, "min")?;
+    fn validate_range(&self, fields: &[Field], rows: &[Row]) -> Result<(), String> {
+        let field_name = self.require_single_field(fields, "range")?;
+        let lo = self.require_int_arg(0, "range")?;
+        let hi = self.require_int_arg(1, "range")?;
+        if lo > hi {
+            return Err(format!("@range: min ({}) must be <= max ({})", lo, hi));
+        }
         for (idx, row) in rows.iter().enumerate() {
             let v = row.get_field(&field_name)
                 .ok_or_else(|| format!("field '{}' missing at row {}", field_name, idx + 1))?;
             let n = self.value_to_i64(v)
-                .ok_or_else(|| format!("@min requires numeric field '{}'", field_name))?;
-            if n < lo {
+                .ok_or_else(|| format!("@range requires numeric field '{}'", field_name))?;
+            if n < lo || n > hi {
                 return Err(format!(
-                    "field '{}' = {} below min {} (row {})", field_name, n, lo, idx + 1,
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_max(&self, fields: &[Field], rows: &[Row]) -> Result<(), String> {
-        let field_name = self.require_single_field(fields, "max")?;
-        let hi = self.require_int_arg(0, "max")?;
-        for (idx, row) in rows.iter().enumerate() {
-            let v = row.get_field(&field_name)
-                .ok_or_else(|| format!("field '{}' missing at row {}", field_name, idx + 1))?;
-            let n = self.value_to_i64(v)
-                .ok_or_else(|| format!("@max requires numeric field '{}'", field_name))?;
-            if n > hi {
-                return Err(format!(
-                    "field '{}' = {} above max {} (row {})", field_name, n, hi, idx + 1,
+                    "field '{}' = {} not in [{}, {}] (row {})",
+                    field_name, n, lo, hi, idx + 1,
                 ));
             }
         }
@@ -494,51 +453,7 @@ impl Constraint {
         Ok(())
     }
 
-    // ---- Layer 2: intra-row cross-field ----
-
-    fn validate_cross_cmp(&self, fields: &[Field], rows: &[Row], kind: CrossCmp) -> Result<(), String> {
-        if self.args.len() != 2 {
-            return Err(format!("@{} requires exactly two field arguments: (host, other)", self.func));
-        }
-        let (host, other) = (&self.args[0], &self.args[1]);
-        if !fields.iter().any(|f| &f.name == host) {
-            return Err(format!("@{}: host field '{}' not found", self.func, host));
-        }
-        if !fields.iter().any(|f| &f.name == other) {
-            return Err(format!("@{}: other field '{}' not found", self.func, other));
-        }
-
-        for (idx, row) in rows.iter().enumerate() {
-            let a = row.get_field(host);
-            let b = row.get_field(other);
-            // Skip rows where either side is missing — let @notnull handle that.
-            let (a, b) = match (a, b) {
-                (Some(a), Some(b)) => (a, b),
-                _ => continue,
-            };
-            let ord = a.partial_cmp(b);
-            let pass = match (kind, ord) {
-                (CrossCmp::Eq, _) => a == b,
-                (CrossCmp::Gt, Some(std::cmp::Ordering::Greater)) => true,
-                (CrossCmp::Lt, Some(std::cmp::Ordering::Less)) => true,
-                _ => false,
-            };
-            if !pass {
-                let op = match kind {
-                    CrossCmp::Eq => "==",
-                    CrossCmp::Gt => ">",
-                    CrossCmp::Lt => "<",
-                };
-                return Err(format!(
-                    "row {}: '{}' {} '{}' violated ({} {} {})", idx + 1,
-                    host, op, other, a, op, b,
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    // ---- Layer 3: intra-table extensions ----
+    // ---- Layer 2 (intra-row cross-field) intentionally omitted — see doc/design.md ----
 
     fn is_considered_empty(v: &Value) -> bool {
         match v {
@@ -546,42 +461,6 @@ impl Constraint {
             Value::Null => true,
             _ => false,
         }
-    }
-    fn is_considered_empty_opt(v: Option<&Value>) -> bool {
-        match v {
-            None => true,
-            Some(v) => Self::is_considered_empty(v),
-        }
-    }
-
-    fn validate_id(&self, fields: &[Field], rows: &[Row]) -> Result<(), String> {
-        // @id == NOT NULL on the field(s) AND @unique (which already skips empty cells).
-        let field_names: Vec<String> = if self.args.is_empty() {
-            if fields.len() != 1 {
-                return Err("@id without args requires exactly one field".to_string());
-            }
-            vec![fields[0].name.clone()]
-        } else {
-            for name in &self.args {
-                if !fields.iter().any(|f| &f.name == name) {
-                    return Err(format!("@id: field '{}' not found", name));
-                }
-            }
-            self.args.clone()
-        };
-
-        for (idx, row) in rows.iter().enumerate() {
-            for name in &field_names {
-                if Self::is_considered_empty_opt(row.get_field(name)) {
-                    return Err(format!("@id field '{}' must not be empty at row {}", name, idx + 1));
-                }
-            }
-        }
-        // Defer to validate_unique on the same fields; @unique now skips empty cells
-        // so this naturally deduplicates only the non-null subset.
-        let mut probe = self.clone();
-        probe.func = "unique".to_string();
-        probe.validate(fields, rows)
     }
 
     // ---- Layer 4: cross-table FK (project-level) ----
@@ -654,14 +533,42 @@ impl Constraint {
     }
 }
 
-#[derive(Copy, Clone)]
-enum CrossCmp { Eq, Gt, Lt }
-
 pub struct ConstraintValidator;
 
 impl ConstraintValidator {
     pub fn validate_table(table: &Table) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
+
+        // Pre-pass: schema-level default-not-null. Any cell that is empty
+        // (missing field, empty string, or `Value::Null`) is reported unless
+        // the field has `@nullable` to opt out.
+        let nullable_fields: std::collections::HashSet<&str> = table.fields.iter()
+            .filter(|f| f.constraint.as_ref().is_some_and(|c| c.func == "nullable"))
+            .map(|f| f.name.as_str())
+            .collect();
+        for field in &table.fields {
+            if nullable_fields.contains(field.name.as_str()) { continue; }
+            for (idx, row) in table.data.iter().enumerate() {
+                let v = row.get_field(&field.name);
+                let empty = match v {
+                    None => true,
+                    Some(Value::String(s)) => s.is_empty(),
+                    Some(Value::Null) => true,
+                    _ => false,
+                };
+                if empty {
+                    errors.push(Diagnostic::new(
+                        DiagnosticCode::ConstraintNullNotAllowed,
+                        format!(
+                            "field '{}' must not be empty at row {}; \
+                             add @nullable to opt out",
+                            field.name, idx + 1,
+                        ),
+                        SourceLocation::default(),
+                    ));
+                }
+            }
+        }
 
         // Field-level constraints (constraint declared in row 4 column).
         for field in &table.fields {
@@ -971,44 +878,6 @@ mod tests {
     fn missing_row() -> Vec<Row> { vec![Row::from_vec(vec![])] }
 
     #[test]
-    fn layer1_notnull_passes_when_filled_and_fails_when_empty() {
-        let c = Constraint::from_str("@notnull").unwrap();
-        let f = mk_str_field("name", c.clone());
-        let pass = one_row(vec![("name", Value::String("alice".into()))]);
-        let fail_empty = empty_row("name");
-        let miss = missing_row();
-        assert!(c.validate(&[f.clone()], &pass).is_ok());
-        assert!(c.validate(&[f.clone()], &fail_empty).is_err());
-        assert!(c.validate(&[f.clone()], &miss).is_err());
-    }
-
-    #[test]
-    fn layer1_min_plus_max_compose_into_range_equivalent() {
-        // @range was removed: compose @min + @max on the same field to get
-        // the equivalent bound. Stacking two constraints is allowed.
-        let cmin = Constraint::from_str("@min(1)").unwrap();
-        let cmax = Constraint::from_str("@max(10)").unwrap();
-        let f1 = mk_int_field("n", FieldType::Int32, cmin.clone());
-        let f2 = mk_int_field("n", FieldType::Int32, cmax.clone());
-        assert!(cmin.validate(&[f1.clone()], &one_row(vec![("n", Value::Int32(5))])).is_ok());
-        assert!(cmax.validate(&[f2.clone()], &one_row(vec![("n", Value::Int32(5))])).is_ok());
-        assert!(cmin.validate(&[f1.clone()], &one_row(vec![("n", Value::Int32(0))])).is_err());
-        assert!(cmax.validate(&[f2.clone()], &one_row(vec![("n", Value::Int32(11))])).is_err());
-    }
-
-    #[test]
-    fn layer1_min_and_max() {
-        let cmin = Constraint::from_str("@min(10)").unwrap();
-        let cmax = Constraint::from_str("@max(20)").unwrap();
-        let f1 = mk_int_field("n", FieldType::Int32, cmin.clone());
-        let f2 = mk_int_field("n", FieldType::Int32, cmax.clone());
-        assert!(cmin.validate(&[f1.clone()], &one_row(vec![("n", Value::Int32(10))])).is_ok());
-        assert!(cmin.validate(&[f1.clone()], &one_row(vec![("n", Value::Int32(9))])).is_err());
-        assert!(cmax.validate(&[f2.clone()], &one_row(vec![("n", Value::Int32(20))])).is_ok());
-        assert!(cmax.validate(&[f2.clone()], &one_row(vec![("n", Value::Int32(21))])).is_err());
-    }
-
-    #[test]
     fn layer1_oneof_strings_and_ints() {
         let c = Constraint::from_str("@oneof(red, green, blue)").unwrap();
         let fs = mk_str_field("color", c.clone());
@@ -1048,9 +917,8 @@ mod tests {
     #[test]
     fn layer1_to_diagnostic_codes() {
         let cases: &[(&str, crate::core::diagnostic::DiagnosticCode)] = &[
-            ("@notnull", crate::core::diagnostic::DiagnosticCode::ConstraintNullNotAllowed),
-            ("@min(0)", crate::core::diagnostic::DiagnosticCode::ConstraintValueViolation),
-            ("@max(1)", crate::core::diagnostic::DiagnosticCode::ConstraintValueViolation),
+            ("@range(0, 1)", crate::core::diagnostic::DiagnosticCode::ConstraintValueViolation),
+            ("@nullable", crate::core::diagnostic::DiagnosticCode::ConstraintNullNotAllowed),
             ("@oneof(a)", crate::core::diagnostic::DiagnosticCode::ConstraintNotInSet),
             ("@maxlen(0)", crate::core::diagnostic::DiagnosticCode::ConstraintValueViolation),
             ("@pattern(\"x\")", crate::core::diagnostic::DiagnosticCode::ConstraintPatternMismatch),
@@ -1068,62 +936,6 @@ mod tests {
     fn field_named(name: &str, t: FieldType) -> Field {
         Field { name: name.into(), t, desc: "".into(), constraint: None, tags: vec![] }
     }
-
-    #[test]
-    fn layer2_eq_pass_and_fail() {
-        let c = Constraint::from_str("@eq(total, sub)").unwrap();
-        let f = vec![
-            field_named("total", FieldType::Int32),
-            field_named("sub",   FieldType::Int32),
-        ];
-        let ok = vec![Row::from_vec(vec![
-            ("total".into(), Value::Int32(10)),
-            ("sub".into(),   Value::Int32(10)),
-        ])];
-        let bad = vec![Row::from_vec(vec![
-            ("total".into(), Value::Int32(10)),
-            ("sub".into(),   Value::Int32(7)),
-        ])];
-        assert!(c.validate(&f, &ok).is_ok());
-        assert!(c.validate(&f, &bad).is_err());
-    }
-
-    #[test]
-    fn layer2_gt_lt_strict() {
-        let fg = Constraint::from_str("@gt(price, cost)").unwrap();
-        let fl = Constraint::from_str("@lt(price, ceiling)").unwrap();
-        let f = vec![
-            field_named("price",   FieldType::Int32),
-            field_named("cost",    FieldType::Int32),
-            field_named("ceiling", FieldType::Int32),
-        ];
-        let rows = vec![
-            Row::from_vec(vec![
-                ("price".into(),   Value::Int32(15)),
-                ("cost".into(),    Value::Int32(10)),
-                ("ceiling".into(), Value::Int32(20)),
-            ]),
-            Row::from_vec(vec![
-                ("price".into(),   Value::Int32(20)),
-                ("cost".into(),    Value::Int32(20)),
-                ("ceiling".into(), Value::Int32(20)),
-            ]),
-        ];
-        // Strict: 20 > 20 fails, 20 < 20 fails.
-        assert!(fg.validate(&f, &rows).is_err());
-        assert!(fl.validate(&f, &rows).is_err());
-    }
-
-    #[test]
-    fn layer2_cross_field_missing_columns_error() {
-        let c = Constraint::from_str("@eq(total, nope)").unwrap();
-        let f = vec![field_named("total", FieldType::Int32)];
-        assert!(c.validate(&f, &[]).is_err());
-        let c2 = Constraint::from_str("@eq(missing, sub)").unwrap();
-        assert!(c2.validate(&f, &[]).is_err());
-    }
-
-    // ---- Layer 3 tests ----
 
     #[test]
     fn layer3_unique_skips_empty_sql_semantics() {
@@ -1149,29 +961,53 @@ mod tests {
     }
 
     #[test]
-    fn layer3_id_requires_non_empty_and_unique_non_null() {
-        let c = Constraint::from_str("@id").unwrap();
-        let f = mk_int_field("id", FieldType::Int32, c.clone());
-        let ok = vec![
-            Row::from_vec(vec![("id".into(), Value::Int32(1))]),
-            Row::from_vec(vec![("id".into(), Value::Int32(2))]),
-            Row::from_vec(vec![("id".into(), Value::Int32(3))]),
+    fn layer1_range_inclusive() {
+        let c = Constraint::from_str("@range(1, 10)").unwrap();
+        let f = mk_int_field("n", FieldType::Int32, c.clone());
+        assert!(c.validate(&[f.clone()], &one_row(vec![("n", Value::Int32(5))])).is_ok());
+        assert!(c.validate(&[f.clone()], &one_row(vec![("n", Value::Int32(1))])).is_ok());
+        assert!(c.validate(&[f.clone()], &one_row(vec![("n", Value::Int32(10))])).is_ok());
+        assert!(c.validate(&[f.clone()], &one_row(vec![("n", Value::Int32(0))])).is_err());
+        assert!(c.validate(&[f.clone()], &one_row(vec![("n", Value::Int32(11))])).is_err());
+    }
+
+    #[test]
+    fn layer1_range_inverted_or_nonint_errors() {
+        // lo > hi is rejected (no degenerate ranges).
+        let bad = Constraint::from_str("@range(10, 1)").unwrap();
+        let f = mk_int_field("n", FieldType::Int32, bad.clone());
+        let r = one_row(vec![("n", Value::Int32(5))]);
+        assert!(bad.validate(&[f.clone()], &r).is_err());
+        // Non-int arg.
+        let nbad = Constraint::from_str("@range(abc, 5)").unwrap();
+        assert!(nbad.validate(&[f], &r).is_err());
+    }
+
+    #[test]
+    fn default_not_null_precheck_rejects_empty_cells() {
+        // Schema-level default-not-null kicks in when no `@nullable` is declared.
+        let f = mk_str_field("name", Constraint::from_str("@oneof(a, b)").unwrap());
+        let rows = vec![
+            Row::from_vec(vec![("name".into(), Value::String("a".into()))]),
+            Row::from_vec(vec![("name".into(), Value::String("".into()))]),
         ];
-        assert!(c.validate(&[f.clone()], &ok).is_ok());
-        // Empty not allowed.
-        let with_empty = vec![
-            Row::from_vec(vec![("id".into(), Value::Int32(1))]),
-            Row::from_vec(vec![("id".into(), Value::Int32(2))]),
-            Row::from_vec(vec![("id".into(), Value::String("".into()))]),
-        ];
-        // Numeric field with empty string → missing; @id rejects missing.
-        assert!(c.validate(&[f.clone()], &with_empty).is_err());
-        // Duplicate non-empty → fail.
-        let dup = vec![
-            Row::from_vec(vec![("id".into(), Value::Int32(1))]),
-            Row::from_vec(vec![("id".into(), Value::Int32(1))]),
-        ];
-        assert!(c.validate(&[f.clone()], &dup).is_err());
+        let t = mk_table("T", vec![f], rows, vec![]);
+        let r = ConstraintValidator::validate_table(&t);
+        assert!(r.is_err());
+        // Both the pre-check (default-not-null) and the @oneof inner
+        // validator complain about the empty cell, so multiple diagnostics
+        // are expected.
+        assert!(!r.err().unwrap().is_empty());
+    }
+
+    #[test]
+    fn nullable_opt_in_silences_default_not_null() {
+        let f = mk_str_field("comment", Constraint::from_str("@nullable").unwrap());
+        let t = mk_table("T", vec![f],
+            vec![Row::from_vec(vec![("comment".into(), Value::String("".into()))])],
+            vec![],
+        );
+        assert!(ConstraintValidator::validate_table(&t).is_ok());
     }
 
     #[test]
@@ -1204,7 +1040,7 @@ mod tests {
 
     #[test]
     fn layer4_ref_passes_when_present_and_fails_when_missing() {
-        let item = mk_table("Item", vec![mk_int_field("id", FieldType::Int32, Constraint::from_str("@id").unwrap())],
+        let item = mk_table("Item", vec![mk_int_field("id", FieldType::Int32, Constraint::from_str("@nullable").unwrap())],
             vec![
                 Row::from_vec(vec![("id".into(), Value::Int32(1))]),
                 Row::from_vec(vec![("id".into(), Value::Int32(2))]),
@@ -1391,34 +1227,6 @@ mod tests {
     }
 
     #[test]
-    fn notnull_rejects_args_and_null_value() {
-        let c = Constraint::from_str("@notnull(extra)").unwrap();
-        let f = mk_int_field("a", FieldType::Int32, c.clone());
-        assert!(c.validate(&[f.clone()], &[]).is_err());
-
-        let c = Constraint::from_str("@notnull").unwrap();
-        let f = mk_int_field("a", FieldType::Int32, c.clone());
-        // Value::Null counts as empty.
-        let rows = vec![Row::from_vec(vec![("a".into(), Value::Null)])];
-        assert!(c.validate(&[f], &rows).is_err());
-    }
-
-    #[test]
-    fn id_requires_field_with_empty_check() {
-        // @id runs validate_unique (now skipping empty) PLUS a non-empty sweep.
-        // The probe path inside @id delegates back to @unique, so we cover both
-        // the empty-check loop and the rename path here.
-        let c = Constraint::from_str("@id").unwrap();
-        let f = mk_int_field("k", FieldType::Int32, c.clone());
-        // Empty cell → @id rejects via the non-empty sweep.
-        let bad = vec![
-            Row::from_vec(vec![("k".into(), Value::Int32(1))]),
-            Row::from_vec(vec![("k".into(), Value::String("".into()))]),
-        ];
-        assert!(c.validate(&[f], &bad).is_err());
-    }
-
-    #[test]
     fn oneof_no_args_and_non_numeric_fallthrough() {
         let c = Constraint::from_str("@oneof()").unwrap();
         let f = mk_str_field("s", c.clone());
@@ -1445,43 +1253,6 @@ mod tests {
         let f = mk_str_field("s", c.clone());
         let r = vec![Row::from_vec(vec![("s".into(), Value::String("a".into()))])];
         assert!(c.validate(&[f], &r).is_err());
-    }
-
-    #[test]
-    fn cross_cmp_wrong_arg_count() {
-        let f = vec![field_named("a", FieldType::Int32), field_named("b", FieldType::Int32)];
-        let cbad = Constraint::from_str("@eq(a)").unwrap();
-        let r = vec![Row::from_vec(vec![("a".into(), Value::Int32(1)), ("b".into(), Value::Int32(1))])];
-        assert!(cbad.validate(&f, &r).is_err());
-    }
-
-    #[test]
-    fn id_no_args_path_and_arg_not_found_and_empty_skip_via_unique() {
-        // Without args + multi-field slice → error.
-        let c = Constraint::from_str("@id").unwrap();
-        let bad = vec![field_named("a", FieldType::Int32), field_named("b", FieldType::Int32)];
-        assert!(c.validate(&bad, &[]).is_err());
-
-        // With args + name not in fields → error.
-        let c2 = Constraint::from_str("@id(no_such)").unwrap();
-        let f = vec![field_named("a", FieldType::Int32)];
-        assert!(c2.validate(&f, &[]).is_err());
-
-        // Empty cell → @id rejects (NOT NULL enforcement), even though @unique alone would skip it.
-        let c3 = Constraint::from_str("@id").unwrap();
-        let f3 = mk_str_field("k", c3.clone());
-        let rows_empty = vec![
-            Row::from_vec(vec![("k".into(), Value::String("".into()))]),
-            Row::from_vec(vec![("k".into(), Value::String("".into()))]),
-        ];
-        assert!(c3.validate(&[f3.clone()], &rows_empty).is_err());
-
-        // Real unique path passes with non-empty values.
-        let rows_ok = vec![
-            Row::from_vec(vec![("k".into(), Value::String("a".into()))]),
-            Row::from_vec(vec![("k".into(), Value::String("b".into()))]),
-        ];
-        assert!(c3.validate(&[f3], &rows_ok).is_ok());
     }
 
     #[test]
