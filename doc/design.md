@@ -17,14 +17,15 @@ tablec 意为 **Table** **C**ompiler, 用于编译 Excel 等表格数据到程�
 
 
 ## 设计
- Excel Sheet 即 `Table`, 前 5 行作为保留行，用于声明 Schema, 其中前 3 行是字段信息，分别是（字段名，字段类型，注释），第 4 行为 Constraint, 第 5 行暂时保留
+ Excel Sheet 即 `Table`, 前 5 行作为保留行声明 Schema（字段名、字段类型、注释、字段级 / 表级 Constraint），第 6 行起为数据行。
 
-| 第1行     | 字段名    |
-| -------- | -------- |
-| 第2行     | 字段类型  |
-| 第3行     | 字段注释  |
-| 第4行     | Constrint |
-| 第5行     | 保留使用 |
+| 第1行     | 字段名 |
+| -------- | ----- |
+| 第2行     | 字段类型 |
+| 第3行     | 字段注释 |
+| 第4行     | Constraint（字段级，每个 cell 一个 `@func`，作用于所在列） |
+| 第5行     | Constraint（表级，每个 cell 一个 `@func`，作用于全表） |
+| 第6行起   | 数据行 |
 
 
 
@@ -84,39 +85,99 @@ or
 | 导出(Json) | {"a":1,"b":"2"} | {"foo":"yes", "bar": [2,3]} | `[{"hello":"yes", "world":{"a":1, "b":1.0}},{"hello":"no","world":{"a":2, "b":2.0}} ]` |
 
 
-## Constraint 
-是对字段类型的额外约束，文法为 **`@func(arg ...)`**.  
-参数可以是裸标识符或 `"带引号"` 的字符串,引号内允许保留空白/逗号/转义符 (`\"`、`\\`).
+## Constraint
 
-围绕"手填容易出错"的目标,目前提供 **14 个具名约束**:
+是对字段类型 / 表关系的额外约束，文法为 **`@func(arg ...)`**. 参数可以是裸标识符或 `"带引号"` 的字符串:引号内允许保留空白/逗号/`\"`/`\\` 转义.
 
-### 单格级 (字段级)
+围绕"手填 Excel 容易出错"的目标，目前提供 **9 个具名约束**，分 4 层:
 
-1. `@notnull` 当前 cell 不能为空字符串 (NULL).
-2. `@min(n)` / `@max(n)` 单边整数界. 闭区间 `[lo, hi]` 叠加 `@min(lo)` + `@max(hi)`.
-3. `@oneof(v1, v2, ...)` 取值必须落在枚举中(字符串或整数). 推荐 `"x"` 引号包裹.
-4. `@maxlen(n)` 字符串字符数上限(UTF-8 chars). 实际写超长字符串是更常见的错填,故只保留上界.
-5. `@pattern("regex")` 字符串需匹配正则. 字面量必须 `"..."` 引号.
+| 层级 | 关注点 | 约束 |
+|---|---|---|
+| 字段级 (Layer 1) | 字段值域 | `@nullable`, `@range(lo, hi)`, `@oneof(...)`, `@maxlen(n)`, `@pattern("…")` |
+| 表级 (Layer 2) | 跨行关系 | `@unique` / `@unique(a, b, …)`, `@seq` / `@seq(step)`, `@order` / `@order(asc)` / `@order(desc)` |
+| 项目级 (Layer 3) | 跨表外键 | `@ref("T.c")` / `@ref(host, "T.c")` |
 
-### 行内跨字段 (表级)
+### 默认非空 (schema-level default-not-null)
 
-1. `@eq(host, other)` 当前行 host 字段值等于 other 字段.
-2. `@gt(host, other)` / `@lt(host, other)` 严格整数比较;`@gte`/`@lte`/`@neq` 故意未保留,`≥` 可用 `@gt` 错位或 `@eq` 表达.
+不在表里声明任何约束，默认要求每个 cell 必须有值。空 cell (空字符串 / `Value::Null` / 缺失) 由 `ConstraintValidator::validate_table` 的 pre-check 直接报 `ConstraintNullNotAllowed`，再跑 inner 校验之前。
 
-### 表内跨行 (字段级或表级)
+要允许空 cell 的字段必须显式声明 `@nullable`，即字段级第五行 cell 写 `@nullable`。该字段上其余 inner 约束 (`@range` / `@oneof` …) 遇到空 cell 时跳过该 row。
 
-1. `@unique` / `@unique(a, b)` **SQL 风格**:空 / NULL cell 不参与唯一比较.
-2. `@id` / `@id(a, b)` 主键:NOT NULL + `@unique` 复合.
-3. `@seq` / `@seq(step)` 序列:起点 1, 步长 1 或给定 step;只支持这两种形式.
-4. `@order` / `@order(asc)` / `@order(desc)` 单字段方向校验.
+### 各约束
 
-### 跨表引用 (项目级,通过 `validate_project`)
+#### 字段级
 
-1. `@ref("Other.col")` 字段级, host = 字段自身.
-2. `@ref(host, "Other.col")` 表级, host 由第一个参数指定.
-3. 空 / NULL cell 自动跳过 (SQL 外键可空),叠加 `@notnull` 强制非空.
+- `@range(lo, hi)` 两个整数参数；cell 必须是整数且 `lo <= value <= hi`，闭区间。`lo > hi` 拒绝。一边界的写法用大极值 (`@range(0, MAX_I64)` / `@range(MIN_I64, 100)`)，不另设 `@min` / `@max`。
+- `@oneof(v1, v2, ...)` 1+ 个参数。每个参数按能否 parse 成 `i64` 自动归到数字桶或字符串桶:cell 是 String 就只比对字符串桶,cell 是数值就只比对数字桶。`@oneof(red, green, blue)` ≡ `@oneof("red", "green", "blue")`。
+- `@maxlen(n)` 一个整数参数；字符串字符数 (UTF-8 chars) 不超过 n。仅保留上界 (`@minlen` / `@len` 不再设)。
+- `@pattern("regex")` 一个参数，必须 `"..."` 引号包裹正则字面量。cell 字符串匹配正则。
 
-`@no_ref` / `@neq` / `@gte` / `@lte` / `@order(primary, secondary)` / `@seq(start, step)` / `@sum_eq(...)` / `@count_*` / `@minlen` / `@len` / `@range` 均为精简前候选,合并到以上 14 个中或移除.
+#### 表级 (行内跨字段约束已砍)
+
+设计上有过 `@eq(host, other)` / `@gt` / `@lt`，表内数字列之间的一致性 / 数值大小关系。已删——手填场景下这类错很罕见，且 GitHub merge 时通常都会被表上的 sum / check 脚本兜住。
+
+#### 表级 (跨行)
+
+- `@unique` / `@unique(a, b, ...)` 0 或多个字段名。SQL 风格: 任一 cell 在 `@nullable` 覆盖下为空时，该 row 跳过; 否则按整行 key 去重。
+- `@seq` / `@seq(step)` 0 / 1 个整数参数。默认起点 1 步长 1; `@seq(step)` 给定 step (可为负)。值必须依次 `1, 1+step, 1+2*step, …`。
+- `@order` / `@order(asc)` / `@order(desc)` 字段级。`asc` 时不允许 `prev > current`;`desc` 时不允许 `prev < current`。
+
+#### 项目级 (跨表)
+
+- `@ref("T.c")` 字段级，host = 字段自身。
+- `@ref(host, "T.c")` 表级，host 由第一参数指定。
+
+`@ref` 只能在 `ConstraintValidator::validate_project(&[Table])` 这条路径执行，需要所有表一次性传入才能解析 `"a.b"`。目标表或列不存在，或 host 值不在目标列中 —— 这三种情况都报 `ConstraintForeignKeyViolation`，msg 区分。host cell 为空 / `Value::Null` 时该 row 跳过 (SQL 外键可空); 需强制非空时叠加 `@notnull` —— 见下一节.
+
+### `@notnull` 与 `@nullable`
+
+> **重要**: 默认非空 = "不需要写 `@notnull`"。手填 cell 为空，pre-check 直接报错。
+
+旧版本 `@notnull` 已删除。若想让某个字段允许空 (例如备注列、引用列的 FK 软删除占位)，在该字段第 4 行写 `@nullable` 即可。`@nullable` 不接受额外参数 (写了也报错)。
+
+举例 — 备注字段可空:
+
+```
+列: comment
+
+| comment                                              |
+| @nullable                                            |
+| (用户填的备注，能空)                                  |
+| (用户填的另一条)                                      |
+```
+
+FK 字段也用 `@nullable` 取消"必须引用存在"的非空强制；host 为空时该 row 跳过。
+
+### 参数解析
+
+- 顶层分隔符 `,`。
+- `"..."` 内 `,` 保留为字面量。
+- `"..."` 内支持 `\"` 与 `\\` 两个转义；其它 `\X` 报错。
+- 单引号不识别 (`'...'` 按字面字符处理)。
+
+### 错误码
+
+校验失败抛 `Diagnostic`，每种约束映射到一个 `DiagnosticCode` (见 `Constraint::to_diagnostic`):
+
+| 触发 | DiagnosticCode |
+|---|---|
+| 默认非空 (空 cell + 无 `@nullable`) | `ConstraintNullNotAllowed` |
+| `@range` / `@maxlen` 越界 | `ConstraintValueViolation` |
+| `@oneof` 不在枚举 | `ConstraintNotInSet` |
+| `@pattern` 不匹配 | `ConstraintPatternMismatch` |
+| `@unique` / `@id` 重复 (已删除) | `ConstraintDuplicate` |
+| `@seq` 序列不一致 | `ConstraintSequenceBroken` |
+| `@order` 违反方向 | `ConstraintOrderViolation` |
+| 解析错误 (语法错) | `TableConstraintParseError` |
+| 未知约束函数 | `ConstraintUnknown` |
+
+`@ref` 报错统一用 `ConstraintForeignKeyViolation` (msg 区分)。
+
+### 执行入口
+
+- `ConstraintValidator::validate_table(&Table)` 先扫 pre-check (默认非空)，再跑该表所有字段级 + 表级约束 (除 `@ref`)。
+- `ConstraintValidator::validate_project(&[Table])` 先对每张表跑 `validate_table`，再统一解析所有 `@ref` 跨表查值。
+- `tablec check` 走 `validate_project` 这条路径 (需要所有表)；其它 build / 单表场景仍可用 `validate_table`。
 
 
 ## 代码工程
