@@ -135,6 +135,8 @@ maturin develop
 python -c "import tablec; tablec.check('file.xlsx')"
 ```
 
+`build(input, output, format)` accepts `json` (minified), `json-pretty` (indented), or `msgpack`. The `json` default matches the CLI's minified output.
+
 ## Architecture
 
 ```

@@ -39,7 +39,7 @@ pytest                                  # Run Python tests
 - **Table schema**: Defines constraints and validation rules
 - **Export formats**: JSON (default), MessagePack (Protobuf is not implemented)
 - **Example generator**: Creates sample Excel files with tablec format
-- **Python API**: `build()` and `check()` functions exposed
+- **Python API**: `build()` and `check()` functions exposed; `build()` accepts `json` (minified) / `json-pretty` (indented) / `msgpack`
 
 ## Development Setup
 
