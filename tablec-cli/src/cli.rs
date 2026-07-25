@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 
 pub use crate::cmd::build::BuildCommand;
 pub use crate::cmd::check::CheckCommand;
-pub use crate::cmd::web::WebCommand;
 pub use crate::cmd::example::ExampleCommand;
 
 #[derive(Debug, Parser)]
@@ -21,8 +20,6 @@ pub enum Command {
     Build(BuildCommand),
     /// Check Excel files for errors
     Check(CheckCommand),
-    /// Start a web server
-    Web(WebCommand),
     /// Create an example Excel file
     Example(ExampleCommand),
 }
