@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use super::value::Value;
 
@@ -11,7 +11,9 @@ pub struct Row {
 
 impl Row {
     pub fn new() -> Self {
-        Self { fields: IndexMap::new() }
+        Self {
+            fields: IndexMap::new(),
+        }
     }
 
     pub fn add_field(&mut self, name: String, value: Value) {

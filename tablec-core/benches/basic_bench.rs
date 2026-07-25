@@ -1,6 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use tablec_core::core::table::table::read_excel;
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::PathBuf;
+use tablec_core::core::table::table::read_excel;
 
 fn bench_parse(c: &mut Criterion) {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

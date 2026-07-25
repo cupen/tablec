@@ -1,8 +1,6 @@
 use tablec_core::core::project::project::Project;
 
-fn build_project(
-    rows: Vec<Vec<(&str, tablec_core::core::table::value::Value)>>,
-) -> Project {
+fn build_project(rows: Vec<Vec<(&str, tablec_core::core::table::value::Value)>>) -> Project {
     use tablec_core::core::table::field::{Field, FieldType};
     use tablec_core::core::table::row::Row;
     use tablec_core::core::table::table::Table;
@@ -44,20 +42,14 @@ fn build_project(
 #[test]
 fn hash_is_stable_across_two_runs() {
     let mut p1 = build_project(vec![vec![
-        (
-            "a",
-            tablec_core::core::table::value::Value::Int32(1),
-        ),
+        ("a", tablec_core::core::table::value::Value::Int32(1)),
         (
             "b",
             tablec_core::core::table::value::Value::String("x".into()),
         ),
     ]]);
     let mut p2 = build_project(vec![vec![
-        (
-            "a",
-            tablec_core::core::table::value::Value::Int32(1),
-        ),
+        ("a", tablec_core::core::table::value::Value::Int32(1)),
         (
             "b",
             tablec_core::core::table::value::Value::String("x".into()),
@@ -110,10 +102,7 @@ fn hash_changes_when_rows_reordered() {
 #[test]
 fn hash_changes_when_row_deleted() {
     let mut p1 = build_project(vec![vec![
-        (
-            "a",
-            tablec_core::core::table::value::Value::Int32(1),
-        ),
+        ("a", tablec_core::core::table::value::Value::Int32(1)),
         (
             "b",
             tablec_core::core::table::value::Value::String("x".into()),
@@ -121,20 +110,14 @@ fn hash_changes_when_row_deleted() {
     ]]);
     let mut p2 = build_project(vec![
         vec![
-            (
-                "a",
-                tablec_core::core::table::value::Value::Int32(1),
-            ),
+            ("a", tablec_core::core::table::value::Value::Int32(1)),
             (
                 "b",
                 tablec_core::core::table::value::Value::String("x".into()),
             ),
         ],
         vec![
-            (
-                "a",
-                tablec_core::core::table::value::Value::Int32(2),
-            ),
+            ("a", tablec_core::core::table::value::Value::Int32(2)),
             (
                 "b",
                 tablec_core::core::table::value::Value::String("y".into()),

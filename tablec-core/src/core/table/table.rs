@@ -1,5 +1,5 @@
-use calamine::{open_workbook_auto, Reader, Data};
-use serde::{Serialize, Deserialize};
+use calamine::{Data, Reader, open_workbook_auto};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use super::field::{self, FieldType};
@@ -24,7 +24,12 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
             return Err(vec![Diagnostic::new(
                 crate::core::diagnostic::DiagnosticCode::Other,
                 format!("failed to open workbook '{}': {}", fpath, e),
-                SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: None, line: None, column: None },
+                SourceLocation {
+                    file: Some(std::path::PathBuf::from(fpath)),
+                    sheet: None,
+                    line: None,
+                    column: None,
+                },
             )]);
         }
     };
@@ -77,25 +82,39 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
         let row5_iter = rows.next();
         let row5: Vec<String> = match row5_iter {
             Some(r) => r.iter().map(|c| c.to_string()).collect(),
-            None    => vec![],
+            None => vec![],
         };
         let mut table_constraints: Vec<Constraint> = Vec::new();
         for (col_idx, raw) in row5.iter().enumerate() {
             let cell = raw.trim();
-            if cell.is_empty() { continue; }
+            if cell.is_empty() {
+                continue;
+            }
             if !cell.starts_with('@') {
                 diagnostics.push(Diagnostic::new(
                     DiagnosticCode::TableConstraintParseError,
-                    format!("row 5 cell {} must start with @, got '{}'", col_idx + 1, cell),
-                    SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
-                                      line: Some(5), column: Some(col_idx as u32 + 1) },
+                    format!(
+                        "row 5 cell {} must start with @, got '{}'",
+                        col_idx + 1,
+                        cell
+                    ),
+                    SourceLocation {
+                        file: Some(std::path::PathBuf::from(fpath)),
+                        sheet: Some(sheet_name.clone()),
+                        line: Some(5),
+                        column: Some(col_idx as u32 + 1),
+                    },
                 ));
                 continue;
             }
-            let loc = SourceLocation { file: Some(std::path::PathBuf::from(fpath)), sheet: Some(sheet_name.clone()),
-                                      line: Some(5), column: Some(col_idx as u32 + 1) };
+            let loc = SourceLocation {
+                file: Some(std::path::PathBuf::from(fpath)),
+                sheet: Some(sheet_name.clone()),
+                line: Some(5),
+                column: Some(col_idx as u32 + 1),
+            };
             match Constraint::from_str_with_loc(cell, loc) {
-                Ok(c)  => table_constraints.push(c),
+                Ok(c) => table_constraints.push(c),
                 Err(d) => diagnostics.push(d),
             }
         }
@@ -148,12 +167,16 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
                 let cell_loc = SourceLocation {
                     file: Some(std::path::PathBuf::from(fpath)),
                     sheet: Some(sheet_name.clone()),
-                    line: Some(row_index as u32 + 6),  // rows 1-5 reserved, data starts at row 6
+                    line: Some(row_index as u32 + 6), // rows 1-5 reserved, data starts at row 6
                     column: Some(col_index as u32 + 1),
                 };
                 match parse_value(&cell_value_str, &field.t, cell_loc) {
-                    Ok(value) => { new_row.add_field(field.name.clone(), value); }
-                    Err(d) => { diagnostics.push(d); }
+                    Ok(value) => {
+                        new_row.add_field(field.name.clone(), value);
+                    }
+                    Err(d) => {
+                        diagnostics.push(d);
+                    }
                 }
             }
             data.push(new_row);
@@ -230,15 +253,25 @@ mod tests {
 
         // 测试JSON导出
         let tables = vec![table];
-        let project = crate::core::project::project::Project::from_tables("test_project".to_string(), tables);
-        let json = crate::export::Json { pretty: false, include_fields: true };
+        let project =
+            crate::core::project::project::Project::from_tables("test_project".to_string(), tables);
+        let json = crate::export::Json {
+            pretty: false,
+            include_fields: true,
+        };
         let result = json.to_vec(&project);
         assert!(result.is_ok(), "JSON export failed: {:?}", result.err());
 
         let json_str = String::from_utf8(result.unwrap()).unwrap();
-        assert!(json_str.contains("test_table"), "JSON should contain table name");
+        assert!(
+            json_str.contains("test_table"),
+            "JSON should contain table name"
+        );
         assert!(json_str.contains("Alice"), "JSON should contain data");
-        assert!(json_str.contains("fields"), "JSON should contain fields when include_fields=true");
+        assert!(
+            json_str.contains("fields"),
+            "JSON should contain fields when include_fields=true"
+        );
     }
 
     #[test]

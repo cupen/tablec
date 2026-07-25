@@ -1,7 +1,7 @@
-use std::error::Error;
 use crate::core::project::project::Project;
 use crate::export::Format;
 use serde_json::json;
+use std::error::Error;
 
 /// JSON export format
 pub struct Json {
@@ -83,16 +83,16 @@ mod tests {
     #[test]
     fn row_object_keys_in_sheet_column_order() {
         let row = Row::from_vec(vec![
-            ("id".to_string(),   Value::Int32(1)),
+            ("id".to_string(), Value::Int32(1)),
             ("name".to_string(), Value::String("Alice".to_string())),
-            ("age".to_string(),  Value::Int32(30)),
+            ("age".to_string(), Value::Int32(30)),
         ]);
         let table = Table {
             name: "users".to_string(),
             fields: vec![
-                mk_field("id",   FieldType::Int32),
+                mk_field("id", FieldType::Int32),
                 mk_field("name", FieldType::String),
-                mk_field("age",  FieldType::Int32),
+                mk_field("age", FieldType::Int32),
             ],
             data: vec![row],
             constraints: vec![],
@@ -100,9 +100,12 @@ mod tests {
         let project = Project::from_tables("test".to_string(), vec![table]);
 
         for pretty in [false, true] {
-            let bytes = Json { pretty, include_fields: false }
-                .to_vec(&project)
-                .expect("json export");
+            let bytes = Json {
+                pretty,
+                include_fields: false,
+            }
+            .to_vec(&project)
+            .expect("json export");
             let v: serde_json::Value = serde_json::from_slice(&bytes).expect("parse json");
 
             let row_value = v
@@ -130,25 +133,28 @@ mod tests {
     #[test]
     fn row_object_keys_skip_parsed_value_error() {
         let row = Row::from_vec(vec![
-            ("id".to_string(),   Value::Int32(7)),
+            ("id".to_string(), Value::Int32(7)),
             ("name".to_string(), Value::String("Bob".to_string())),
             // ("age" intentionally not inserted)
         ]);
         let table = Table {
             name: "users".to_string(),
             fields: vec![
-                mk_field("id",   FieldType::Int32),
+                mk_field("id", FieldType::Int32),
                 mk_field("name", FieldType::String),
-                mk_field("age",  FieldType::Int32),
+                mk_field("age", FieldType::Int32),
             ],
             data: vec![row],
             constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
-        let bytes = Json { pretty: false, include_fields: false }
-            .to_vec(&project)
-            .expect("json export");
+        let bytes = Json {
+            pretty: false,
+            include_fields: false,
+        }
+        .to_vec(&project)
+        .expect("json export");
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("parse");
         let row_value = v.pointer("/tables/0/data/0").expect("row present");
         let obj = row_value.as_object().expect("row is object");
@@ -168,14 +174,14 @@ mod tests {
     #[test]
     fn row_object_keys_drop_commented_columns() {
         let row = Row::from_vec(vec![
-            ("id".to_string(),  Value::Int32(42)),
+            ("id".to_string(), Value::Int32(42)),
             ("age".to_string(), Value::Int32(99)),
         ]);
         let table = Table {
             name: "users".to_string(),
             // No Field for "secret" — it was filtered during read_excel.
             fields: vec![
-                mk_field("id",  FieldType::Int32),
+                mk_field("id", FieldType::Int32),
                 mk_field("age", FieldType::Int32),
             ],
             data: vec![row],
@@ -183,9 +189,12 @@ mod tests {
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
-        let bytes = Json { pretty: false, include_fields: false }
-            .to_vec(&project)
-            .expect("json export");
+        let bytes = Json {
+            pretty: false,
+            include_fields: false,
+        }
+        .to_vec(&project)
+        .expect("json export");
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("parse");
         let row_value = v.pointer("/tables/0/data/0").expect("row present");
         let obj = row_value.as_object().expect("row is object");
@@ -205,25 +214,28 @@ mod tests {
     #[test]
     fn include_fields_does_not_break_row_order() {
         let row = Row::from_vec(vec![
-            ("id".to_string(),   Value::Int32(11)),
+            ("id".to_string(), Value::Int32(11)),
             ("name".to_string(), Value::String("Carol".to_string())),
-            ("age".to_string(),  Value::Int32(45)),
+            ("age".to_string(), Value::Int32(45)),
         ]);
         let table = Table {
             name: "users".to_string(),
             fields: vec![
-                mk_field("id",   FieldType::Int32),
+                mk_field("id", FieldType::Int32),
                 mk_field("name", FieldType::String),
-                mk_field("age",  FieldType::Int32),
+                mk_field("age", FieldType::Int32),
             ],
             data: vec![row],
             constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
-        let bytes = Json { pretty: false, include_fields: true }
-            .to_vec(&project)
-            .expect("json export");
+        let bytes = Json {
+            pretty: false,
+            include_fields: true,
+        }
+        .to_vec(&project)
+        .expect("json export");
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("parse");
 
         // Row objects retain sheet order.
@@ -257,16 +269,16 @@ mod tests {
     #[test]
     fn pretty_and_compact_have_same_key_order() {
         let row = Row::from_vec(vec![
-            ("id".to_string(),   Value::Int32(3)),
+            ("id".to_string(), Value::Int32(3)),
             ("name".to_string(), Value::String("Dave".to_string())),
-            ("age".to_string(),  Value::Int32(50)),
+            ("age".to_string(), Value::Int32(50)),
         ]);
         let table = Table {
             name: "users".to_string(),
             fields: vec![
-                mk_field("id",   FieldType::Int32),
+                mk_field("id", FieldType::Int32),
                 mk_field("name", FieldType::String),
-                mk_field("age",  FieldType::Int32),
+                mk_field("age", FieldType::Int32),
             ],
             data: vec![row],
             constraints: vec![],
@@ -274,21 +286,42 @@ mod tests {
         let project = Project::from_tables("test".to_string(), vec![table]);
 
         let compact: serde_json::Value = serde_json::from_slice(
-            &Json { pretty: false, include_fields: false }.to_vec(&project).expect("compact"),
-        ).expect("parse compact");
+            &Json {
+                pretty: false,
+                include_fields: false,
+            }
+            .to_vec(&project)
+            .expect("compact"),
+        )
+        .expect("parse compact");
         let pretty: serde_json::Value = serde_json::from_slice(
-            &Json { pretty: true, include_fields: false }.to_vec(&project).expect("pretty"),
-        ).expect("parse pretty");
+            &Json {
+                pretty: true,
+                include_fields: false,
+            }
+            .to_vec(&project)
+            .expect("pretty"),
+        )
+        .expect("parse pretty");
 
         let compact_keys: Vec<String> = compact
-            .pointer("/tables/0/data/0").and_then(|r| r.as_object())
-            .expect("compact row").keys().cloned().collect();
+            .pointer("/tables/0/data/0")
+            .and_then(|r| r.as_object())
+            .expect("compact row")
+            .keys()
+            .cloned()
+            .collect();
         let pretty_keys: Vec<String> = pretty
-            .pointer("/tables/0/data/0").and_then(|r| r.as_object())
-            .expect("pretty row").keys().cloned().collect();
+            .pointer("/tables/0/data/0")
+            .and_then(|r| r.as_object())
+            .expect("pretty row")
+            .keys()
+            .cloned()
+            .collect();
 
         assert_eq!(
-            compact_keys, pretty_keys,
+            compact_keys,
+            pretty_keys,
             "compact and pretty must produce the same row key order, got compact={compact_keys:?} pretty={pretty_keys:?}",
             compact_keys = compact_keys,
             pretty_keys = pretty_keys,

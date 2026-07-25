@@ -2,7 +2,7 @@ use clap::Args;
 use std::error::Error;
 use std::path::PathBuf;
 use tablec_core::core::config::{self, Config};
-use tablec_core::core::table::{table::read_excel, constraint::ConstraintValidator};
+use tablec_core::core::table::{constraint::ConstraintValidator, table::read_excel};
 
 #[derive(Args, Debug)]
 pub struct CheckCommand {
@@ -44,18 +44,16 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
 
     if path.is_dir() {
         // Get include/exclude patterns from config if available
-        let include = config.as_ref()
+        let include = config
+            .as_ref()
             .and_then(|c| c.data.include.clone())
             .unwrap_or_else(|| vec!["*.xlsx".to_string()]);
-        let exclude = config.as_ref()
+        let exclude = config
+            .as_ref()
             .and_then(|c| c.data.exclude.clone())
             .unwrap_or_default();
 
-        excel_files = config::find_excel_files(
-            &path.to_string_lossy(),
-            &include,
-            &exclude
-        )?;
+        excel_files = config::find_excel_files(&path.to_string_lossy(), &include, &exclude)?;
     } else if path.is_file() {
         excel_files.push(path);
     }

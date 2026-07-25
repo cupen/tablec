@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use tablec_core::core::diagnostic::{Diagnostic, Severity, SourceLocation, DiagnosticCode};
+use tablec_core::core::diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceLocation};
 
 pub(crate) fn render_diags<W: Write>(diags: &[Diagnostic], out: &mut W) -> io::Result<()> {
     for d in diags {
@@ -18,16 +18,42 @@ pub(crate) fn render_diags<W: Write>(diags: &[Diagnostic], out: &mut W) -> io::R
 }
 
 pub(crate) fn diag_exit_code(diags: &[Diagnostic]) -> i32 {
-    if diags.iter().any(|d| matches!(d.severity, Severity::Error)) { 1 } else { 0 }
+    if diags.iter().any(|d| matches!(d.severity, Severity::Error)) {
+        1
+    } else {
+        0
+    }
 }
 
 pub(crate) fn diag_summary(diags: &[Diagnostic]) -> String {
-    let errors = diags.iter().filter(|d| matches!(d.severity, Severity::Error)).count();
-    let warnings = diags.iter().filter(|d| matches!(d.severity, Severity::Warning)).count();
+    let errors = diags
+        .iter()
+        .filter(|d| matches!(d.severity, Severity::Error))
+        .count();
+    let warnings = diags
+        .iter()
+        .filter(|d| matches!(d.severity, Severity::Warning))
+        .count();
     let mut parts = Vec::new();
-    if errors > 0 { parts.push(format!("{} {}", errors, if errors == 1 { "error" } else { "errors" })); }
-    if warnings > 0 { parts.push(format!("{} {}", warnings, if warnings == 1 { "warning" } else { "warnings" })); }
-    if parts.is_empty() { "no issues".to_string() } else { parts.join(", ") }
+    if errors > 0 {
+        parts.push(format!(
+            "{} {}",
+            errors,
+            if errors == 1 { "error" } else { "errors" }
+        ));
+    }
+    if warnings > 0 {
+        parts.push(format!(
+            "{} {}",
+            warnings,
+            if warnings == 1 { "warning" } else { "warnings" }
+        ));
+    }
+    if parts.is_empty() {
+        "no issues".to_string()
+    } else {
+        parts.join(", ")
+    }
 }
 
 #[cfg(test)]
@@ -37,13 +63,20 @@ mod tests {
     use std::hash::{Hash, Hasher};
 
     fn diag_with(sev: Severity, msg: &str) -> Diagnostic {
-        Diagnostic { severity: sev, code: DiagnosticCode::Other, message: msg.to_string(),
-            location: SourceLocation::default() }
+        Diagnostic {
+            severity: sev,
+            code: DiagnosticCode::Other,
+            message: msg.to_string(),
+            location: SourceLocation::default(),
+        }
     }
 
     #[test]
     fn render_diags_writes_one_line_per_diag() {
-        let diags = vec![diag_with(Severity::Error, "a"), diag_with(Severity::Warning, "b")];
+        let diags = vec![
+            diag_with(Severity::Error, "a"),
+            diag_with(Severity::Warning, "b"),
+        ];
         let mut buf: Vec<u8> = Vec::new();
         render_diags(&diags, &mut buf).unwrap();
         let s = std::str::from_utf8(&buf).unwrap();
@@ -63,7 +96,8 @@ mod tests {
             location: SourceLocation {
                 file: Some(std::path::PathBuf::from("/abs/x.xlsx")),
                 sheet: Some("S".into()),
-                line: Some(2), column: Some(5),
+                line: Some(2),
+                column: Some(5),
             },
         };
         let mut buf: Vec<u8> = Vec::new();
@@ -86,7 +120,10 @@ mod tests {
 
     #[test]
     fn diag_exit_code_first_error_returns_1() {
-        let diags = vec![diag_with(Severity::Error, "e"), diag_with(Severity::Warning, "w")];
+        let diags = vec![
+            diag_with(Severity::Error, "e"),
+            diag_with(Severity::Warning, "w"),
+        ];
         assert_eq!(diag_exit_code(&diags), 1);
     }
 

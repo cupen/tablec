@@ -1,5 +1,5 @@
-use tablec_cli::cli;
 use cli::Command;
+use tablec_cli::cli;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = cli::parse_args();
