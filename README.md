@@ -8,7 +8,7 @@ A **Table Compiler** for game development - compiles Excel/CSV/JSON table data i
 - **Blazing Fast**: Optimized Rust implementation
 - **Rich Type System**: Support for basic types, arrays, maps, and structs
 - **Multiple Export Formats**: JSON, MessagePack
-- **CLI Tool**: Build, check, example, and web server commands
+- **CLI Tool**: Build, check, example commands
 - **Python Bindings**: Native Python API via PyO3
 
 ## Installation
@@ -38,12 +38,6 @@ tablec check path/to/files
 
 ```bash
 tablec example -o example.xlsx -r 10
-```
-
-### Start Web Server
-
-```bash
-tablec web --listen 127.0.0.1:8080
 ```
 
 ## Data Format
