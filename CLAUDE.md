@@ -47,6 +47,7 @@ pytest                                  # Run Python tests
 2. For Python: `pip install maturin`
 3. Build: `cargo build --release`
 4. Test: `cargo test` or `pytest binding-python/tests/`
+5. Enable `cargo fmt` pre-commit hook once: `git config core.hooksPath .githooks`
 
 ## File Structure
 

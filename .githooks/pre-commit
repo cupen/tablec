@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run cargo fmt --all on tracked files, stage the changes,
+# and let the commit proceed. Mirrors the Go community's "gofmt runs on save"
+# experience — format drift never reaches CI.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# Skip once for a single commit (e.g. importing pre-existing fmt drift):
+#   git commit --no-verify
+
+set -euo pipefail
+
+# Only run if cargo is available; otherwise let commit proceed.
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: cargo not found, skipping cargo fmt" >&2
+    exit 0
+fi
+
+# Only run inside a cargo workspace (avoid running on unrelated repos).
+if [ ! -f Cargo.toml ]; then
+    exit 0
+fi
+
+cargo fmt --all
+
+# Stage formatting fixes to tracked files only (don't pick up untracked).
+git add -u
+
+exit 0

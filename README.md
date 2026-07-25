@@ -137,6 +137,24 @@ python -c "import tablec; tablec.check('file.xlsx')"
 
 `build(input, output, format)` accepts `json` (minified), `json-pretty` (indented), or `msgpack`. The `json` default matches the CLI's minified output.
 
+## Development
+
+### Auto-format on commit
+
+This repo ships a git pre-commit hook that runs `cargo fmt --all` and stages the result before each commit (mirrors Go's `gofmt` workflow — format drift never reaches CI). Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Bypass for a single commit when importing pre-existing drift:
+
+```bash
+git commit --no-verify
+```
+
+CI also runs `cargo fmt --all --check` as a backstop.
+
 ## Architecture
 
 ```
