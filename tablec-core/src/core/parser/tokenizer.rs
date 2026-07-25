@@ -56,7 +56,11 @@ pub fn scan_tokens<'a>(s: &'a str, loc: SourceLocation) -> Result<Vec<Token<'a>>
                 return Err(Diagnostic::new(
                     DiagnosticCode::TokenizerUnexpectedChar,
                     format!("Unexpected character: '{}'", c),
-                    SourceLocation { line: loc.line, column: loc.column.map(|x| x + i as u32), ..Default::default() },
+                    SourceLocation {
+                        line: loc.line,
+                        column: loc.column.map(|x| x + i as u32),
+                        ..Default::default()
+                    },
                 ));
             }
         }
@@ -70,15 +74,17 @@ mod tests {
     use crate::core::diagnostic::*;
     #[test]
     fn test_parse_tokens() {
-        let tokens = scan_tokens("array<int>, map<string, int>, array<float>", SourceLocation::default()).unwrap();
+        let tokens = scan_tokens(
+            "array<int>, map<string, int>, array<float>",
+            SourceLocation::default(),
+        )
+        .unwrap();
 
         let actual: Vec<&str> = tokens.iter().map(|t| t.value).collect();
 
         let expected = vec![
-            "array", "<", "int", ">", ",",
-            "map", "<", "string", ",",
-            "int", ">", ",",
-            "array", "<", "float", ">",
+            "array", "<", "int", ">", ",", "map", "<", "string", ",", "int", ">", ",", "array",
+            "<", "float", ">",
         ];
         assert_eq!(expected, actual);
     }
@@ -100,13 +106,19 @@ mod result_tests {
     fn symbols_only_tokens() {
         let loc = SourceLocation::default();
         let tokens = scan_tokens("[]<>{},:", loc).unwrap();
-        assert_eq!(tokens.iter().map(|t| t.value).collect::<Vec<_>>(),
-            vec!["[", "]", "<", ">", "{", "}", ",", ":"]);
+        assert_eq!(
+            tokens.iter().map(|t| t.value).collect::<Vec<_>>(),
+            vec!["[", "]", "<", ">", "{", "}", ",", ":"]
+        );
     }
 
     #[test]
     fn unrecognized_char_returns_diagnostic() {
-        let loc = SourceLocation { line: Some(1), column: Some(4), ..Default::default() };
+        let loc = SourceLocation {
+            line: Some(1),
+            column: Some(4),
+            ..Default::default()
+        };
         let err = scan_tokens("int🙂", loc).unwrap_err();
         assert_eq!(err.code, DiagnosticCode::TokenizerUnexpectedChar);
         assert_eq!(err.location.line, Some(1));

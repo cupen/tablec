@@ -2,11 +2,13 @@ use clap::{Parser, Subcommand};
 
 pub use crate::cmd::build::BuildCommand;
 pub use crate::cmd::check::CheckCommand;
-pub use crate::cmd::web::WebCommand;
 pub use crate::cmd::example::ExampleCommand;
 
 #[derive(Debug, Parser)]
-#[command(name = "tablec", about = "table compiler for build data from Excel files")]
+#[command(
+    name = "tablec",
+    about = "table compiler for build data from Excel files"
+)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,
@@ -21,12 +23,10 @@ pub enum Command {
     Build(BuildCommand),
     /// Check Excel files for errors
     Check(CheckCommand),
-    /// Start a web server
-    Web(WebCommand),
     /// Create an example Excel file
     Example(ExampleCommand),
 }
 
 pub fn parse_args() -> Args {
-    return Args::parse()
+    return Args::parse();
 }

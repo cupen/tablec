@@ -10,7 +10,10 @@ pub struct SourceLocation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Severity { Error, Warning }
+pub enum Severity {
+    Error,
+    Warning,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -50,16 +53,30 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn new(code: DiagnosticCode, message: impl Into<String>, location: SourceLocation) -> Self {
-        Self { severity: Severity::Error, code, message: message.into(), location }
+        Self {
+            severity: Severity::Error,
+            code,
+            message: message.into(),
+            location,
+        }
     }
 }
 
 impl From<&str> for Diagnostic {
-    fn from(s: &str) -> Self { Diagnostic::new(DiagnosticCode::Other, s, SourceLocation::default()) }
+    fn from(s: &str) -> Self {
+        Diagnostic::new(DiagnosticCode::Other, s, SourceLocation::default())
+    }
 }
 
 impl Default for SourceLocation {
-    fn default() -> Self { Self { file: None, sheet: None, line: None, column: None } }
+    fn default() -> Self {
+        Self {
+            file: None,
+            sheet: None,
+            line: None,
+            column: None,
+        }
+    }
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -83,8 +100,16 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_preserves_fields() {
-        let d = Diagnostic::new(DiagnosticCode::ValueOutOfRange, "200 not in int8 range [-128, 127]",
-            SourceLocation { file: None, sheet: Some("Sheet1".into()), line: Some(6), column: Some(2) });
+        let d = Diagnostic::new(
+            DiagnosticCode::ValueOutOfRange,
+            "200 not in int8 range [-128, 127]",
+            SourceLocation {
+                file: None,
+                sheet: Some("Sheet1".into()),
+                line: Some(6),
+                column: Some(2),
+            },
+        );
         let json = serde_json::to_string(&d).unwrap();
         let d2: Diagnostic = serde_json::from_str(&json).unwrap();
         assert_eq!(d.code, d2.code);
@@ -94,8 +119,16 @@ mod tests {
 
     #[test]
     fn display_with_full_location() {
-        let d = Diagnostic::new(DiagnosticCode::TokenizerUnexpectedChar, "bad char",
-            SourceLocation { file: None, sheet: Some("S".into()), line: Some(1), column: Some(3) });
+        let d = Diagnostic::new(
+            DiagnosticCode::TokenizerUnexpectedChar,
+            "bad char",
+            SourceLocation {
+                file: None,
+                sheet: Some("S".into()),
+                line: Some(1),
+                column: Some(3),
+            },
+        );
         let s = format!("{}", d);
         assert!(s.contains("TokenizerUnexpectedChar"));
         assert!(s.contains("S"));

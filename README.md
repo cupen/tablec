@@ -8,7 +8,7 @@ A **Table Compiler** for game development - compiles Excel/CSV/JSON table data i
 - **Blazing Fast**: Optimized Rust implementation
 - **Rich Type System**: Support for basic types, arrays, maps, and structs
 - **Multiple Export Formats**: JSON, MessagePack
-- **CLI Tool**: Build, check, example, and web server commands
+- **CLI Tool**: Build, check, example commands
 - **Python Bindings**: Native Python API via PyO3
 
 ## Installation
@@ -38,12 +38,6 @@ tablec check path/to/files
 
 ```bash
 tablec example -o example.xlsx -r 10
-```
-
-### Start Web Server
-
-```bash
-tablec web --listen 127.0.0.1:8080
 ```
 
 ## Data Format
@@ -140,6 +134,26 @@ maturin develop
 
 python -c "import tablec; tablec.check('file.xlsx')"
 ```
+
+`build(input, output, format)` accepts `json` (minified), `json-pretty` (indented), or `msgpack`. The `json` default matches the CLI's minified output.
+
+## Development
+
+### Auto-format on commit
+
+This repo ships a git pre-commit hook that runs `cargo fmt --all` and stages the result before each commit (mirrors Go's `gofmt` workflow — format drift never reaches CI). Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Bypass for a single commit when importing pre-existing drift:
+
+```bash
+git commit --no-verify
+```
+
+CI also runs `cargo fmt --all --check` as a backstop.
 
 ## Architecture
 

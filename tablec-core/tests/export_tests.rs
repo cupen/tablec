@@ -1,11 +1,11 @@
-use tablec_core::core::project::project::Project;
+use indexmap::IndexMap;
 use tablec_core::core::project::meta::{Meta, ToolVersion};
-use tablec_core::core::table::table::Table;
+use tablec_core::core::project::project::Project;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
+use tablec_core::core::table::table::Table;
 use tablec_core::core::table::value::Value;
 use tablec_core::export::{Format, Json, Msgpack};
-use indexmap::IndexMap;
 
 fn make_simple_project() -> Project {
     let tables = IndexMap::from([(
@@ -69,7 +69,10 @@ fn make_simple_project() -> Project {
 #[test]
 fn test_json_export_pretty_with_fields() {
     let project = make_simple_project();
-    let json = Json { pretty: true, include_fields: true };
+    let json = Json {
+        pretty: true,
+        include_fields: true,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
 
@@ -88,7 +91,10 @@ fn test_json_export_pretty_with_fields() {
 #[test]
 fn test_json_export_pretty_without_fields() {
     let project = make_simple_project();
-    let json = Json { pretty: true, include_fields: false };
+    let json = Json {
+        pretty: true,
+        include_fields: false,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
 
@@ -103,7 +109,10 @@ fn test_json_export_pretty_without_fields() {
 #[test]
 fn test_json_export_compact() {
     let project = make_simple_project();
-    let json = Json { pretty: false, include_fields: false };
+    let json = Json {
+        pretty: false,
+        include_fields: false,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
 
@@ -116,7 +125,10 @@ fn test_json_export_compact() {
 #[test]
 fn test_json_export_has_meta() {
     let project = make_simple_project();
-    let json = Json { pretty: true, include_fields: false };
+    let json = Json {
+        pretty: true,
+        include_fields: false,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
 
@@ -137,7 +149,10 @@ fn test_json_export_empty_project() {
         },
         tables: IndexMap::new(),
     };
-    let json = Json { pretty: true, include_fields: false };
+    let json = Json {
+        pretty: true,
+        include_fields: false,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -189,29 +204,50 @@ fn test_msgpack_export_empty_project() {
 #[test]
 fn test_msgpack_export_multi_table() {
     let tables = IndexMap::from([
-        ("table_a".to_string(), Table {
-            name: "table_a".to_string(),
-            fields: vec![Field {
-                name: "x".to_string(), t: FieldType::Int32,
-                desc: "".to_string(), constraint: None, tags: vec![],
-            }],
-            data: vec![Row::from_vec(vec![("x".to_string(), Value::Int32(1))])],
-            constraints: vec![],
-        }),
-        ("table_b".to_string(), Table {
-            name: "table_b".to_string(),
-            fields: vec![Field {
-                name: "y".to_string(), t: FieldType::String,
-                desc: "".to_string(), constraint: None, tags: vec![],
-            }],
-            data: vec![Row::from_vec(vec![("y".to_string(), Value::String("hello".to_string()))])],
-            constraints: vec![],
-        }),
+        (
+            "table_a".to_string(),
+            Table {
+                name: "table_a".to_string(),
+                fields: vec![Field {
+                    name: "x".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec![],
+                }],
+                data: vec![Row::from_vec(vec![("x".to_string(), Value::Int32(1))])],
+                constraints: vec![],
+            },
+        ),
+        (
+            "table_b".to_string(),
+            Table {
+                name: "table_b".to_string(),
+                fields: vec![Field {
+                    name: "y".to_string(),
+                    t: FieldType::String,
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec![],
+                }],
+                data: vec![Row::from_vec(vec![(
+                    "y".to_string(),
+                    Value::String("hello".to_string()),
+                )])],
+                constraints: vec![],
+            },
+        ),
     ]);
 
     let project = Project {
         name: "multi".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
+        meta: Meta {
+            version: "1.0.0".to_string(),
+            hash: [0u8; 32],
+            build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
+        },
         tables,
     };
 
@@ -232,30 +268,38 @@ fn test_json_export_all_value_types() {
         Table {
             name: "all_types".to_string(),
             fields: vec![],
-            data: vec![
-                Row::from_vec(vec![
-                    ("int_val".to_string(), Value::Int32(42)),
-                    ("uint_val".to_string(), Value::Uint32(100)),
-                    ("float_val".to_string(), Value::Float32(3.14)),
-                    ("string_val".to_string(), Value::String("hello".to_string())),
-                    ("bool_val".to_string(), Value::Bool(true)),
-                    ("null_val".to_string(), Value::Null),
-                    ("array_val".to_string(), Value::Array(vec![
-                        Value::Int32(1), Value::Int32(2),
-                    ])),
-                ]),
-            ],
+            data: vec![Row::from_vec(vec![
+                ("int_val".to_string(), Value::Int32(42)),
+                ("uint_val".to_string(), Value::Uint32(100)),
+                ("float_val".to_string(), Value::Float32(3.14)),
+                ("string_val".to_string(), Value::String("hello".to_string())),
+                ("bool_val".to_string(), Value::Bool(true)),
+                ("null_val".to_string(), Value::Null),
+                (
+                    "array_val".to_string(),
+                    Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
+                ),
+            ])],
             constraints: vec![],
         },
     )]);
 
     let project = Project {
         name: "types_test".to_string(),
-        meta: Meta { version: "1.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
+        meta: Meta {
+            version: "1.0.0".to_string(),
+            hash: [0u8; 32],
+            build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
+        },
         tables,
     };
 
-    let json = Json { pretty: true, include_fields: false };
+    let json = Json {
+        pretty: true,
+        include_fields: false,
+    };
     let result = json.to_vec(&project).unwrap();
     let s = String::from_utf8(result).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();

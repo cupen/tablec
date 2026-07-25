@@ -6,11 +6,9 @@ edition = "2024"
 [dependencies]
 tablec-core = { path = "../tablec-core" }
 clap = { version = "4.5.13", features = ["derive"] }
-actix-web = "4.0"
 tempfile = "3.10.1"
 rust_xlsxwriter = "0.90.1"
 calamine = "0.25.0"
-tokio = { version = "1", features = ["full"] }
 rand = "0.9.2"
 glob = "0.3"
 

@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
-use std::str::FromStr;
-use crate::core::parser::tokenizer::{scan_tokens, Token, TokenType};
-use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
 use super::constraint::Constraint;
+use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
+use crate::core::parser::tokenizer::{Token, TokenType, scan_tokens};
 use crate::core::table::types::Type;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Field {
@@ -35,9 +35,16 @@ pub enum FieldType {
     DateTime,
     Timestamp64,
     Timestamp32,
-    Array { r#type: Box<FieldType> },
-    Map { key: Box<FieldType>, value: Box<FieldType> },
-    Struct { fields: Vec<Field> },
+    Array {
+        r#type: Box<FieldType>,
+    },
+    Map {
+        key: Box<FieldType>,
+        value: Box<FieldType>,
+    },
+    Struct {
+        fields: Vec<Field>,
+    },
 }
 
 impl FieldType {
@@ -47,24 +54,30 @@ impl FieldType {
             FieldType::Int16 => Type::Int16,
             FieldType::Int32 => Type::Int32,
             FieldType::Int64 => Type::Int64,
-            FieldType::Int  => Type::Int32,
+            FieldType::Int => Type::Int32,
             FieldType::Uint8 => Type::Uint8,
             FieldType::Uint16 => Type::Uint16,
             FieldType::Uint32 => Type::Uint32,
             FieldType::Uint64 => Type::Uint64,
-            FieldType::Uint  => Type::Uint32,
+            FieldType::Uint => Type::Uint32,
             FieldType::Float32 => Type::Float32,
             FieldType::Float64 => Type::Float64,
             FieldType::Float => Type::Float32,
             FieldType::String => Type::String,
             FieldType::Bool => Type::Bool,
-            FieldType::Date | FieldType::DateTime
-                | FieldType::Timestamp32 | FieldType::Timestamp64 => Type::String,
+            FieldType::Date
+            | FieldType::DateTime
+            | FieldType::Timestamp32
+            | FieldType::Timestamp64 => Type::String,
             FieldType::Array { r#type } => Type::Array(Box::new(r#type.to_type())),
-            FieldType::Map { key, value } => Type::Map(Box::new(key.to_type()), Box::new(value.to_type())),
+            FieldType::Map { key, value } => {
+                Type::Map(Box::new(key.to_type()), Box::new(value.to_type()))
+            }
             FieldType::Struct { fields } => {
                 let mut m = std::collections::HashMap::new();
-                for f in fields { m.insert(f.name.clone(), f.t.to_type()); }
+                for f in fields {
+                    m.insert(f.name.clone(), f.t.to_type());
+                }
                 Type::Struct(m)
             }
         }
@@ -112,7 +125,9 @@ fn parse_from_tokens(
                         loc.clone(),
                     ));
                 }
-                base_type = FieldType::Array { r#type: Box::new(base_type) };
+                base_type = FieldType::Array {
+                    r#type: Box::new(base_type),
+                };
             } else {
                 return Err(Diagnostic::new(
                     DiagnosticCode::TypeParseError,
@@ -176,7 +191,9 @@ fn parse_array_type(
     consume_token(tokens, "<", loc)?;
     let inner_type = parse_from_tokens(tokens, loc)?;
     consume_token(tokens, ">", loc)?;
-    Ok(FieldType::Array { r#type: Box::new(inner_type) })
+    Ok(FieldType::Array {
+        r#type: Box::new(inner_type),
+    })
 }
 
 fn parse_map_type(
@@ -188,7 +205,10 @@ fn parse_map_type(
     consume_token(tokens, ",", loc)?;
     let value_type = parse_from_tokens(tokens, loc)?;
     consume_token(tokens, ">", loc)?;
-    Ok(FieldType::Map { key: Box::new(key_type), value: Box::new(value_type) })
+    Ok(FieldType::Map {
+        key: Box::new(key_type),
+        value: Box::new(value_type),
+    })
 }
 
 fn parse_struct_type(
@@ -255,11 +275,13 @@ fn parse_struct_type(
         match next_token.value {
             "}" => break,
             "," => continue,
-            _ => return Err(Diagnostic::new(
-                DiagnosticCode::TypeParseError,
-                format!("Expected '}}' or ',' but got {}", next_token.value),
-                loc.clone(),
-            )),
+            _ => {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::TypeParseError,
+                    format!("Expected '}}' or ',' but got {}", next_token.value),
+                    loc.clone(),
+                ));
+            }
         }
     }
 
@@ -303,14 +325,26 @@ mod tests {
     #[test]
     fn test_parse_simple_types() {
         assert_eq!(FieldType::from_str("int").unwrap(), FieldType::Int32);
-        assert_eq!(FieldType::from_str("string[]").unwrap(), FieldType::Array { r#type: Box::new(FieldType::String) });
-        assert_eq!(FieldType::from_str("array<int>").unwrap(), FieldType::Array { r#type: Box::new(FieldType::Int32) });
+        assert_eq!(
+            FieldType::from_str("string[]").unwrap(),
+            FieldType::Array {
+                r#type: Box::new(FieldType::String)
+            }
+        );
+        assert_eq!(
+            FieldType::from_str("array<int>").unwrap(),
+            FieldType::Array {
+                r#type: Box::new(FieldType::Int32)
+            }
+        );
     }
 
     #[test]
     fn test_parse_nested_array() {
         let expected = FieldType::Array {
-            r#type: Box::new(FieldType::Array { r#type: Box::new(FieldType::Int32) })
+            r#type: Box::new(FieldType::Array {
+                r#type: Box::new(FieldType::Int32),
+            }),
         };
         assert_eq!(FieldType::from_str("int[][]").unwrap(), expected);
         assert_eq!(FieldType::from_str("array<array<int>>").unwrap(), expected);
@@ -320,21 +354,43 @@ mod tests {
     fn test_parse_map_with_complex_types() {
         let expected = FieldType::Map {
             key: Box::new(FieldType::String),
-            value: Box::new(FieldType::Array { r#type: Box::new(FieldType::Int32) })
+            value: Box::new(FieldType::Array {
+                r#type: Box::new(FieldType::Int32),
+            }),
         };
         assert_eq!(FieldType::from_str("map<string, int[]>").unwrap(), expected);
-        assert_eq!(FieldType::from_str("map<string, array<int>>").unwrap(), expected);
+        assert_eq!(
+            FieldType::from_str("map<string, array<int>>").unwrap(),
+            expected
+        );
     }
 
     #[test]
     fn test_parse_struct() {
         let expected = FieldType::Struct {
             fields: vec![
-                Field { name: "a".to_string(), t: FieldType::Int32, desc: "".to_string(), constraint: None, tags: vec![] },
-                Field { name: "b".to_string(), t: FieldType::Array { r#type: Box::new(FieldType::String) }, desc: "".to_string(), constraint: None, tags: vec![] },
-            ]
+                Field {
+                    name: "a".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec![],
+                },
+                Field {
+                    name: "b".to_string(),
+                    t: FieldType::Array {
+                        r#type: Box::new(FieldType::String),
+                    },
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec![],
+                },
+            ],
         };
-        assert_eq!(FieldType::from_str("struct{a:int, b:string[]}").unwrap(), expected);
+        assert_eq!(
+            FieldType::from_str("struct{a:int, b:string[]}").unwrap(),
+            expected
+        );
     }
 }
 
@@ -346,12 +402,21 @@ mod parse_field_type_tests {
     #[test]
     fn parse_field_type_ok() {
         let ty = parse_field_type("int[]", SourceLocation::default()).unwrap();
-        assert_eq!(ty, FieldType::Array { r#type: Box::new(FieldType::Int32) });
+        assert_eq!(
+            ty,
+            FieldType::Array {
+                r#type: Box::new(FieldType::Int32)
+            }
+        );
     }
 
     #[test]
     fn parse_field_type_bad_returns_diagnostic() {
-        let loc = SourceLocation { sheet: Some("S".into()), line: Some(2), ..Default::default() };
+        let loc = SourceLocation {
+            sheet: Some("S".into()),
+            line: Some(2),
+            ..Default::default()
+        };
         let err = parse_field_type("foo", loc.clone()).unwrap_err();
         assert_eq!(err.code, DiagnosticCode::TypeUnknown);
         assert!(err.message.contains("foo"));

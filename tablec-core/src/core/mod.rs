@@ -1,5 +1,5 @@
+pub mod config;
 pub mod diagnostic;
-pub mod table;
 pub mod parser;
 pub mod project;
-pub mod config;
+pub mod table;

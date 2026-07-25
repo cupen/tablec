@@ -4,9 +4,9 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tablec_core::core::config::{self, Config};
+use tablec_core::core::project::project::Project;
 use tablec_core::core::table::constraint::ConstraintValidator;
 use tablec_core::core::table::table::read_excel;
-use tablec_core::core::project::project::Project;
 use tablec_core::export::{Format, Json, Msgpack};
 
 /// Format a `Duration` as a human-readable ms/s string.
@@ -71,9 +71,9 @@ impl BuildCommand {
     fn run_with_config(&self, cfg: Config) -> Result<(), Box<dyn Error>> {
         // CLI arguments override config values
         let format = self.format.clone().unwrap_or(cfg.export.format);
-        let include_fields = self.include_fields.unwrap_or(
-            cfg.export.include_fields.unwrap_or(false)
-        );
+        let include_fields = self
+            .include_fields
+            .unwrap_or(cfg.export.include_fields.unwrap_or(false));
 
         // Determine input/output
         if let (Some(input), Some(output)) = (&self.input, &self.output) {
@@ -89,27 +89,38 @@ impl BuildCommand {
                 return Err(format!(
                     "No Excel files found in '{}' matching the specified patterns.",
                     cfg.data.input_dir
-                ).into());
+                )
+                .into());
             }
 
             if excel_files.len() == 1 {
                 // Single file - use project name as output
                 let input_path = excel_files[0].to_string_lossy();
                 let output = self.output.clone().unwrap_or_else(|| {
-                    format!("{}/{}.{}",
+                    format!(
+                        "{}/{}.{}",
                         cfg.export.output_dir,
                         cfg.project.name,
-                        if format == "msgpack" { "msgpack" } else { "json" }
+                        if format == "msgpack" {
+                            "msgpack"
+                        } else {
+                            "json"
+                        }
                     )
                 });
                 self.build_single_file(&input_path, &output, &format, include_fields)?;
             } else {
                 // Multiple files - merge all tables into single output
                 let output = self.output.clone().unwrap_or_else(|| {
-                    format!("{}/{}.{}",
+                    format!(
+                        "{}/{}.{}",
                         cfg.export.output_dir,
                         cfg.project.name,
-                        if format == "msgpack" { "msgpack" } else { "json" }
+                        if format == "msgpack" {
+                            "msgpack"
+                        } else {
+                            "json"
+                        }
                     )
                 });
                 self.build_merged_files(&excel_files, &output, &format, include_fields)?;
@@ -121,9 +132,13 @@ impl BuildCommand {
 
     fn run_without_config(&self) -> Result<(), Box<dyn Error>> {
         // Require explicit CLI arguments
-        let input = self.input.as_ref()
+        let input = self
+            .input
+            .as_ref()
             .ok_or("No input file specified. Use -i <file> or provide a config file.")?;
-        let output = self.output.as_ref()
+        let output = self
+            .output
+            .as_ref()
             .ok_or("No output file specified. Use -o <file> or provide a config file.")?;
         let format = self.format.clone().unwrap_or_else(|| "json".to_string());
         let include_fields = self.include_fields.unwrap_or(false);
@@ -145,7 +160,11 @@ impl BuildCommand {
             Ok(t) => t,
             Err(errs) => {
                 crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
-                return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
+                return Err(format!(
+                    "read_excel failed: {}",
+                    crate::diag_render::diag_summary(&errs)
+                )
+                .into());
             }
         };
         let parse_elapsed = parse_start.elapsed();
@@ -157,8 +176,11 @@ impl BuildCommand {
             let v_elapsed = v_start.elapsed();
             eprintln!(
                 "{}/{}: {} rows (parse={}, validate={})",
-                input, table.name, table.data.len(),
-                fmt_duration(parse_elapsed), fmt_duration(v_elapsed),
+                input,
+                table.name,
+                table.data.len(),
+                fmt_duration(parse_elapsed),
+                fmt_duration(v_elapsed),
             );
         }
 
@@ -166,21 +188,37 @@ impl BuildCommand {
 
         match format {
             "json" => {
-                Json { pretty: false, include_fields }.export(&project, output)?;
+                Json {
+                    pretty: false,
+                    include_fields,
+                }
+                .export(&project, output)?;
             }
             "json-pretty" => {
-                Json { pretty: true, include_fields }.export(&project, output)?;
+                Json {
+                    pretty: true,
+                    include_fields,
+                }
+                .export(&project, output)?;
             }
             "msgpack" => {
                 Msgpack.export(&project, output)?;
             }
             _ => {
-                return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
+                return Err(format!(
+                    "Unsupported format '{}'. Use one of: json, json-pretty, msgpack.",
+                    format
+                )
+                .into());
             }
         }
 
         let total_elapsed = total_start.elapsed();
-        eprintln!("Total: {} tables, {}", table_count, fmt_duration(total_elapsed));
+        eprintln!(
+            "Total: {} tables, {}",
+            table_count,
+            fmt_duration(total_elapsed)
+        );
         Ok(())
     }
 
@@ -204,7 +242,11 @@ impl BuildCommand {
                 Ok(t) => t,
                 Err(errs) => {
                     crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
-                    return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
+                    return Err(format!(
+                        "read_excel failed: {}",
+                        crate::diag_render::diag_summary(&errs)
+                    )
+                    .into());
                 }
             };
             let parse_elapsed = parse_start.elapsed();
@@ -216,8 +258,11 @@ impl BuildCommand {
                 let v_elapsed = v_start.elapsed();
                 eprintln!(
                     "{}/{}: {} rows (parse={}, validate={})",
-                    file_str, table.name, table.data.len(),
-                    fmt_duration(parse_elapsed), fmt_duration(v_elapsed),
+                    file_str,
+                    table.name,
+                    table.data.len(),
+                    fmt_duration(parse_elapsed),
+                    fmt_duration(v_elapsed),
                 );
             }
 
@@ -229,11 +274,19 @@ impl BuildCommand {
 
         match format {
             "json" => {
-                Json { pretty: false, include_fields }.export(&project, output)?;
+                Json {
+                    pretty: false,
+                    include_fields,
+                }
+                .export(&project, output)?;
                 println!("Merged {} tables into {}", project.tables.len(), output);
             }
             "json-pretty" => {
-                Json { pretty: true, include_fields }.export(&project, output)?;
+                Json {
+                    pretty: true,
+                    include_fields,
+                }
+                .export(&project, output)?;
                 println!("Merged {} tables into {}", project.tables.len(), output);
             }
             "msgpack" => {
@@ -241,39 +294,65 @@ impl BuildCommand {
                 println!("Merged tables into {}", output);
             }
             _ => {
-                return Err(format!("Unsupported format '{}'. Use one of: json, json-pretty, msgpack.", format).into());
+                return Err(format!(
+                    "Unsupported format '{}'. Use one of: json, json-pretty, msgpack.",
+                    format
+                )
+                .into());
             }
         }
 
         let total_elapsed = total_start.elapsed();
-        eprintln!("Total: {} tables, {}", total_table_count, fmt_duration(total_elapsed));
+        eprintln!(
+            "Total: {} tables, {}",
+            total_table_count,
+            fmt_duration(total_elapsed)
+        );
         Ok(())
     }
 }
 
 // This function is for the python library, returning the JSON as a string.
-pub fn build_to_string(input_path: &str, format: &str, include_fields: bool) -> Result<String, Box<dyn Error>> {
+pub fn build_to_string(
+    input_path: &str,
+    format: &str,
+    include_fields: bool,
+) -> Result<String, Box<dyn Error>> {
     let tables = match read_excel(input_path) {
         Ok(t) => t,
         Err(errs) => {
             crate::diag_render::render_diags(&errs, &mut io::stderr().lock())?;
-            return Err(format!("read_excel failed: {}", crate::diag_render::diag_summary(&errs)).into());
+            return Err(format!(
+                "read_excel failed: {}",
+                crate::diag_render::diag_summary(&errs)
+            )
+            .into());
         }
     };
     let project = Project::from_tables("unnamed".to_string(), tables);
     match format {
         "json" => {
-            let json = Json { pretty: false, include_fields };
+            let json = Json {
+                pretty: false,
+                include_fields,
+            };
             let bytes = json.to_vec(&project)?;
             Ok(String::from_utf8(bytes)?)
         }
         "json-pretty" => {
-            let json = Json { pretty: true, include_fields };
+            let json = Json {
+                pretty: true,
+                include_fields,
+            };
             let bytes = json.to_vec(&project)?;
             Ok(String::from_utf8(bytes)?)
         }
         // Other formats could be added here if needed.
-        _ => Err(format!("Unsupported format '{}'. Use 'json' or 'json-pretty'.", format).into()),
+        _ => Err(format!(
+            "Unsupported format '{}'. Use 'json' or 'json-pretty'.",
+            format
+        )
+        .into()),
     }
 }
 

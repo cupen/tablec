@@ -74,7 +74,7 @@ impl Serialize for Meta {
 
 impl<'de> Deserialize<'de> for Meta {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::{Visitor, MapAccess};
+        use serde::de::{MapAccess, Visitor};
         use std::fmt;
 
         // Custom visitor reading exactly the 5 fields we serialize.
@@ -99,12 +99,15 @@ impl<'de> Deserialize<'de> for Meta {
                         "build_at" => build_at = Some(map.next_value()?),
                         "source" => source = Some(map.next_value()?),
                         "tool" => tool = Some(map.next_value()?),
-                        _ => { let _: serde::de::IgnoredAny = map.next_value()?; }
+                        _ => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
                     }
                 }
                 let version = version.ok_or_else(|| serde::de::Error::missing_field("version"))?;
                 let hash_s = hash.ok_or_else(|| serde::de::Error::missing_field("hash"))?;
-                let build_at = build_at.ok_or_else(|| serde::de::Error::missing_field("build_at"))?;
+                let build_at =
+                    build_at.ok_or_else(|| serde::de::Error::missing_field("build_at"))?;
                 let source = source.unwrap_or_default();
                 let tool = tool.flatten().unwrap_or_default();
                 if hash_s.len() != 64 {
@@ -125,7 +128,11 @@ impl<'de> Deserialize<'de> for Meta {
             }
         }
 
-        d.deserialize_struct("Meta", &["version", "hash", "build_at", "source", "tool"], MetaVisitor)
+        d.deserialize_struct(
+            "Meta",
+            &["version", "hash", "build_at", "source", "tool"],
+            MetaVisitor,
+        )
     }
 }
 
@@ -144,7 +151,7 @@ impl Serialize for ToolVersion {
 
 impl<'de> Deserialize<'de> for ToolVersion {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::{Visitor, MapAccess};
+        use serde::de::{MapAccess, Visitor};
         use std::fmt;
 
         struct ToolVersionVisitor;
@@ -164,7 +171,9 @@ impl<'de> Deserialize<'de> for ToolVersion {
                         "calamine" => calamine = Some(map.next_value()?),
                         "serde_json" => serde_json = Some(map.next_value()?),
                         "blake3" => blake3 = Some(map.next_value()?),
-                        _ => { let _: serde::de::IgnoredAny = map.next_value()?; }
+                        _ => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
                     }
                 }
                 let tablec = tablec.ok_or_else(|| serde::de::Error::missing_field("tablec"))?;
@@ -182,7 +191,11 @@ impl<'de> Deserialize<'de> for ToolVersion {
             }
         }
 
-        d.deserialize_struct("ToolVersion", &["tablec", "calamine", "serde_json", "blake3"], ToolVersionVisitor)
+        d.deserialize_struct(
+            "ToolVersion",
+            &["tablec", "calamine", "serde_json", "blake3"],
+            ToolVersionVisitor,
+        )
     }
 }
 

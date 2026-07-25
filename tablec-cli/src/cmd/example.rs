@@ -1,20 +1,39 @@
 use clap::Args;
-use std::error::Error;
 use rand::Rng;
-use rust_xlsxwriter::{Workbook, Format, Color, FormatBorder};
+use rust_xlsxwriter::{Color, Format, FormatBorder, Workbook};
+use std::error::Error;
 
 #[derive(Args, Debug)]
 pub struct ExampleCommand {
-    #[arg(short, long, default_value = "example.xlsx", help = "output example Excel file path")]
+    #[arg(
+        short,
+        long,
+        default_value = "example.xlsx",
+        help = "output example Excel file path"
+    )]
     pub output: String,
 
-    #[arg(short, long, default_value_t = 10, help = "number of data rows to generate")]
+    #[arg(
+        short,
+        long,
+        default_value_t = 10,
+        help = "number of data rows to generate"
+    )]
     pub rows: usize,
 
-    #[arg(short = 'f', long, default_value_t = false, help = "whether to overwrite existing files")]
+    #[arg(
+        short = 'f',
+        long,
+        default_value_t = false,
+        help = "whether to overwrite existing files"
+    )]
     pub force: bool,
 
-    #[arg(long, default_value_t = false, help = "use random data instead of sequential (default is sequential)")]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "use random data instead of sequential (default is sequential)"
+    )]
     pub rand: bool,
 }
 
@@ -22,7 +41,11 @@ impl ExampleCommand {
     pub fn run(&self) -> Result<(), Box<dyn Error>> {
         let fpath = std::path::Path::new(&self.output);
         if fpath.exists() && !self.force {
-            return Err(format!("File '{}' already exists. Use --force to overwrite.", self.output).into());
+            return Err(format!(
+                "File '{}' already exists. Use --force to overwrite.",
+                self.output
+            )
+            .into());
         }
 
         // 创建新的工作簿
@@ -59,27 +82,38 @@ impl ExampleCommand {
 
         // 表头定义 - 符合 tablec 格式，覆盖所有类型
         let field_names = vec![
-            "id", "name", "age", "score", "active", "tags", "meta",
-            "numbers", "mapping", "nested",
+            "id", "name", "age", "score", "active", "tags", "meta", "numbers", "mapping", "nested",
         ];
 
         let field_types = vec![
-            "int32", "string", "int16", "float64", "bool", "string[]", "{a:int,b:str}",
-            "int[][]", "map<string,int>", "{x:int,y:float}[]",
+            "int32",
+            "string",
+            "int16",
+            "float64",
+            "bool",
+            "string[]",
+            "{a:int,b:str}",
+            "int[][]",
+            "map<string,int>",
+            "{x:int,y:float}[]",
         ];
 
         let field_comments = vec![
-            "主键", "名称", "年龄", "分数", "是否激活", "标签", "元数据结构体",
-            "二维整数数组", "字符串到整数的映射", "浮点结构体数组",
+            "主键",
+            "名称",
+            "年龄",
+            "分数",
+            "是否激活",
+            "标签",
+            "元数据结构体",
+            "二维整数数组",
+            "字符串到整数的映射",
+            "浮点结构体数组",
         ];
 
-        let constraints = vec![
-            "@unique", "", "", "", "", "", "", "", "", "",
-        ];
+        let constraints = vec!["@unique", "", "", "", "", "", "", "", "", ""];
 
-        let reserved = vec![
-            "", "", "", "", "", "", "", "", "", "",
-        ];
+        let reserved = vec!["", "", "", "", "", "", "", "", "", ""];
 
         // 写入表头 - 前5行
         // 第1行：字段名
@@ -94,7 +128,12 @@ impl ExampleCommand {
 
         // 第3行：字段注释
         for (col, field_comment) in field_comments.iter().enumerate() {
-            worksheet.write_string_with_format(2, col as u16, *field_comment, &field_comment_format)?;
+            worksheet.write_string_with_format(
+                2,
+                col as u16,
+                *field_comment,
+                &field_comment_format,
+            )?;
         }
 
         // 第4行：约束
@@ -146,36 +185,74 @@ impl ExampleCommand {
 
             // tags (string[]) - 固定: [tag1,tag2], 随机: [tag?,tag?]
             let tag1 = if self.rand { rnd.random_range(1..5) } else { 1 };
-            let tag2 = if self.rand { rnd.random_range(1..5) } else { 2.min(i as i32) };
+            let tag2 = if self.rand {
+                rnd.random_range(1..5)
+            } else {
+                2.min(i as i32)
+            };
             worksheet.write_string(row_idx, 5, &format!("[tag{},tag{}]", tag1, tag2))?;
 
             // meta ({a:int,b:str}) - 固定: {i,str_i}, 随机: {?,?}
-            let meta_a: i32 = if self.rand { rnd.random_range(1..100) } else { i as i32 };
-            let meta_b = if self.rand { format!("str{}", rnd.random_range(1..10)) } else { format!("str_{}", i) };
-            worksheet.write_string(row_idx, 6, &format!("{{{}}}", format!("{},{}", meta_a, meta_b)))?;
+            let meta_a: i32 = if self.rand {
+                rnd.random_range(1..100)
+            } else {
+                i as i32
+            };
+            let meta_b = if self.rand {
+                format!("str{}", rnd.random_range(1..10))
+            } else {
+                format!("str_{}", i)
+            };
+            worksheet.write_string(
+                row_idx,
+                6,
+                &format!("{{{}}}", format!("{},{}", meta_a, meta_b)),
+            )?;
 
             // numbers (int[][]) - 固定: [[i,i+1],[i+2,i+3]], 随机: random
             let nums = if self.rand {
-                format!("[[{},{}],[{},{}]]",
-                    rnd.random_range(1..10), rnd.random_range(1..10),
-                    rnd.random_range(1..10), rnd.random_range(1..10))
+                format!(
+                    "[[{},{}],[{},{}]]",
+                    rnd.random_range(1..10),
+                    rnd.random_range(1..10),
+                    rnd.random_range(1..10),
+                    rnd.random_range(1..10)
+                )
             } else {
-                format!("[[{},{}],[{},{}]]", i, i+1, i+2, i+3)
+                format!("[[{},{}],[{},{}]]", i, i + 1, i + 2, i + 3)
             };
             worksheet.write_string(row_idx, 7, &nums)?;
 
             // mapping (map<string,int>) - 格式: k1:1, k2:2
-            let map_val1: i32 = if self.rand { rnd.random_range(1..50) } else { i as i32 };
-            let map_val2: i32 = if self.rand { rnd.random_range(1..50) } else { (i as i32) * 2 };
+            let map_val1: i32 = if self.rand {
+                rnd.random_range(1..50)
+            } else {
+                i as i32
+            };
+            let map_val2: i32 = if self.rand {
+                rnd.random_range(1..50)
+            } else {
+                (i as i32) * 2
+            };
             worksheet.write_string(row_idx, 8, &format!("k1:{},k2:{}", map_val1, map_val2))?;
 
             // nested ({x:int,y:float}[]) - 固定: [{i,float_i},..], 随机
             let nested = if self.rand {
-                format!("[{{{},{}}},{{{},{}}}]",
-                    rnd.random_range(1..20), rnd.random_range(1.0..10.0),
-                    rnd.random_range(1..20), rnd.random_range(1.0..10.0))
+                format!(
+                    "[{{{},{}}},{{{},{}}}]",
+                    rnd.random_range(1..20),
+                    rnd.random_range(1.0..10.0),
+                    rnd.random_range(1..20),
+                    rnd.random_range(1.0..10.0)
+                )
             } else {
-                format!("[{{{},{:.1}}},{{{},{:.1}}}]", i, i as f64, i+10, (i+10) as f64)
+                format!(
+                    "[{{{},{:.1}}},{{{},{:.1}}}]",
+                    i,
+                    i as f64,
+                    i + 10,
+                    (i + 10) as f64
+                )
             };
             worksheet.write_string(row_idx, 9, &nested)?;
         }
@@ -186,11 +263,13 @@ impl ExampleCommand {
         let mode = if self.rand { "random" } else { "sequential" };
         println!("Created example Excel file: {}", self.output);
         println!("Generated {} rows with {} data", self.rows, mode);
-        println!("Column types: int32, string, int16, float64, bool, string[], {{a:int,b:str}}, int[][], map<string,int>, {{x:int,y:float}}[]");
-        println!("Table header format: field_name | field_type | field_comment | constraint | reserved");
+        println!(
+            "Column types: int32, string, int16, float64, bool, string[], {{a:int,b:str}}, int[][], map<string,int>, {{x:int,y:float}}[]"
+        );
+        println!(
+            "Table header format: field_name | field_type | field_comment | constraint | reserved"
+        );
 
         Ok(())
     }
 }
-
-

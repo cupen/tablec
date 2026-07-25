@@ -1,6 +1,6 @@
+use pyo3::Bound;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3::Bound;
 use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::project::project::Project;
 use tablec_core::core::table::table::Table;
@@ -8,7 +8,11 @@ use tablec_core::export::{Format, Json, Msgpack};
 
 fn read_excel_or_pyerr(input: &str) -> PyResult<Vec<Table>> {
     tablec_core::core::table::table::read_excel(input).map_err(|errs| {
-        let msg = errs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n");
+        let msg = errs
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         pyo3::exceptions::PyValueError::new_err(msg)
     })
 }
@@ -23,25 +27,41 @@ fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
             .and_then(|s| s.to_str())
             .unwrap_or("untitled")
             .to_string(),
-        meta: Meta { version: "0.0.0".to_string(), hash: [0u8; 32], build_at: 0, source: vec![], tool: ToolVersion::default() },
+        meta: Meta {
+            version: "0.0.0".to_string(),
+            hash: [0u8; 32],
+            build_at: 0,
+            source: vec![],
+            tool: ToolVersion::default(),
+        },
         tables: tables.into_iter().map(|t| (t.name.clone(), t)).collect(),
     };
 
-    match format {
-        "json" => {
-            let json = Json { pretty: true, include_fields: false };
-            let bytes = json.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let bytes: Vec<u8> = match format {
+        "json" => Json {
+            pretty: false,
+            include_fields: false,
         }
-        "msgpack" => {
-            let msgpack = Msgpack;
-            let bytes = msgpack.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        .to_vec(&project)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        "json-pretty" => Json {
+            pretty: true,
+            include_fields: false,
         }
-        _ => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!("Unsupported format '{}'", format)));
+        .to_vec(&project)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        "msgpack" => Msgpack
+            .to_vec(&project)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Unsupported format '{}'. Use one of: json, json-pretty, msgpack.",
+                other
+            )));
         }
-    }
+    };
+    std::fs::write(output, bytes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
     Ok(())
 }
@@ -52,14 +72,17 @@ fn check(input: &str) -> PyResult<()> {
 
     for table in &tables {
         if let Err(errs) = table.validate_constraints() {
-            let msg = errs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n");
+            let msg = errs
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
             return Err(pyo3::exceptions::PyValueError::new_err(msg));
         }
     }
 
     Ok(())
 }
-
 
 #[pymodule]
 fn _native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {

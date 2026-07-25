@@ -1,7 +1,7 @@
-use tablec_core::core::table::value::Value;
 use indexmap::IndexMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tablec_core::core::table::value::Value;
 
 fn hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
@@ -51,11 +51,7 @@ fn test_display_null() {
 
 #[test]
 fn test_display_array() {
-    let arr = Value::Array(vec![
-        Value::Int32(1),
-        Value::Int32(2),
-        Value::Int32(3),
-    ]);
+    let arr = Value::Array(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]);
     assert_eq!(arr.to_string(), "[1, 2, 3]");
 }
 
@@ -172,7 +168,10 @@ fn test_eq_struct_diff_vals() {
 fn test_cmp_int() {
     assert!(Value::Int32(1) < Value::Int32(2));
     assert!(Value::Int32(2) > Value::Int32(1));
-    assert_eq!(Value::Int32(1).partial_cmp(&Value::Int32(1)), Some(std::cmp::Ordering::Equal));
+    assert_eq!(
+        Value::Int32(1).partial_cmp(&Value::Int32(1)),
+        Some(std::cmp::Ordering::Equal)
+    );
 }
 
 #[test]
@@ -185,7 +184,10 @@ fn test_cmp_float() {
 fn test_cmp_cross_int_float() {
     assert!(Value::Int32(1) < Value::Float64(2.0));
     assert!(Value::Float64(1.5) > Value::Int32(1));
-    assert_eq!(Value::Int32(1).partial_cmp(&Value::Float64(1.0)), Some(std::cmp::Ordering::Equal));
+    assert_eq!(
+        Value::Int32(1).partial_cmp(&Value::Float64(1.0)),
+        Some(std::cmp::Ordering::Equal)
+    );
 }
 
 #[test]
@@ -198,7 +200,10 @@ fn test_cmp_cross_uint_float() {
 fn test_cmp_cross_int_uint() {
     assert!(Value::Int32(1) < Value::Uint32(5));
     assert!(Value::Uint32(5) > Value::Int32(1));
-    assert_eq!(Value::Int32(1).partial_cmp(&Value::Uint32(1)), Some(std::cmp::Ordering::Equal));
+    assert_eq!(
+        Value::Int32(1).partial_cmp(&Value::Uint32(1)),
+        Some(std::cmp::Ordering::Equal)
+    );
 }
 
 #[test]
@@ -210,7 +215,10 @@ fn test_cmp_string() {
 #[test]
 fn test_cmp_incomparable() {
     assert_eq!(Value::Bool(true).partial_cmp(&Value::Bool(false)), None);
-    assert_eq!(Value::String("a".to_string()).partial_cmp(&Value::Int32(1)), None);
+    assert_eq!(
+        Value::String("a".to_string()).partial_cmp(&Value::Int32(1)),
+        None
+    );
     assert_eq!(Value::Null.partial_cmp(&Value::Null), None);
 }
 
@@ -437,20 +445,36 @@ fn test_value_clone() {
 fn numeric_helper_round_trip() {
     use tablec_core::core::table::value::Value;
     let cases = vec![
-        Value::Int8(-1), Value::Int16(-1), Value::Int32(-1), Value::Int64(-1),
-        Value::Uint8(1), Value::Uint16(1), Value::Uint32(1), Value::Uint64(1),
-        Value::Float32(1.5), Value::Float64(1.5),
+        Value::Int8(-1),
+        Value::Int16(-1),
+        Value::Int32(-1),
+        Value::Int64(-1),
+        Value::Uint8(1),
+        Value::Uint16(1),
+        Value::Uint32(1),
+        Value::Uint64(1),
+        Value::Float32(1.5),
+        Value::Float64(1.5),
     ];
     for v in &cases {
         // Helpers are crate-private; we exercise them via public traits.
         // First check: Serialize outputs the same JSON for each width.
         let s = serde_json::to_string(v).unwrap();
-        assert!(s == "-1" || s == "1" || s == "1.5", "unexpected serialize: {}", s);
+        assert!(
+            s == "-1" || s == "1" || s == "1.5",
+            "unexpected serialize: {}",
+            s
+        );
         // Second check: Hash is deterministic across calls.
         let mut h1 = std::collections::hash_map::DefaultHasher::new();
         let mut h2 = std::collections::hash_map::DefaultHasher::new();
         std::hash::Hash::hash(v, &mut h1);
         std::hash::Hash::hash(v, &mut h2);
-        assert_eq!(h1.finish(), h2.finish(), "hash not deterministic for {:?}", v);
+        assert_eq!(
+            h1.finish(),
+            h2.finish(),
+            "hash not deterministic for {:?}",
+            v
+        );
     }
 }

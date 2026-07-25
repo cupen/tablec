@@ -1,16 +1,20 @@
+use super::super::config::Config;
+use super::meta::Meta;
+use crate::core::table::field::Field;
+use crate::core::table::table::Table;
+use crate::export::Format;
 use blake3::Hasher;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use crate::core::table::field::Field;
-use crate::core::table::table::Table;
-use super::meta::Meta;
-use super::super::config::Config;
-use crate::export::Format;
 
 fn read_excel_with_box(path: &str) -> Result<Vec<Table>, Box<dyn std::error::Error>> {
     crate::core::table::table::read_excel(path).map_err(|errs| {
-        let msg = errs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n");
+        let msg = errs
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         Box::<dyn std::error::Error>::from(msg)
     })
 }
@@ -42,7 +46,10 @@ impl Project {
         Ok(Self::from_tables_with_source(name, tables, source))
     }
 
-    pub fn from_config(config: &Config, input_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_config(
+        config: &Config,
+        input_path: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let tables = read_excel_with_box(input_path)?;
         let name = config.project.name.clone();
         let source = vec![std::path::PathBuf::from(input_path)];
@@ -52,7 +59,11 @@ impl Project {
     /// Same as `from_tables` but stamps `source` (input file paths) into
     /// `Meta` and seeds `Meta.hash` via `calculate_hash`. Use this when the
     /// final artifact's hash should be observable to consumers.
-    pub fn from_tables_with_source(name: String, tables: Vec<Table>, source: Vec<std::path::PathBuf>) -> Self {
+    pub fn from_tables_with_source(
+        name: String,
+        tables: Vec<Table>,
+        source: Vec<std::path::PathBuf>,
+    ) -> Self {
         let mut project = Self::from_tables(name, tables);
         project.meta.source = source;
         project.calculate_hash();
@@ -77,15 +88,14 @@ impl Project {
 
             // Data rows, row-order sensitive (any reorder/delete -> byte stream change -> hash change).
             for row in &table.data {
-                let row_canon = serde_json::to_vec(&row.fields)
-                    .expect("row always serializable");
+                let row_canon = serde_json::to_vec(&row.fields).expect("row always serializable");
                 hasher.update(&row_canon);
             }
         }
 
         self.meta.hash = *hasher.finalize().as_bytes();
     }
-    
+
     pub fn validate_all(&self) -> Result<(), Vec<crate::core::diagnostic::Diagnostic>> {
         let mut all_errors = Vec::new();
 

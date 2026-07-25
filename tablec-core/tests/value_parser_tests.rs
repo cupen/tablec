@@ -3,39 +3,58 @@ use tablec_core::core::parser::value_parser::parse_value;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::value::Value;
 
-fn loc() -> SourceLocation { SourceLocation::default() }
+fn loc() -> SourceLocation {
+    SourceLocation::default()
+}
 
 // === Basic types: happy path ===
 
 #[test]
 fn test_parse_int_positive() {
-    assert_eq!(parse_value("42", &FieldType::Int32, loc()).unwrap(), Value::Int32(42));
+    assert_eq!(
+        parse_value("42", &FieldType::Int32, loc()).unwrap(),
+        Value::Int32(42)
+    );
 }
 
 #[test]
 fn test_parse_int_negative() {
-    assert_eq!(parse_value("-7", &FieldType::Int32, loc()).unwrap(), Value::Int32(-7));
+    assert_eq!(
+        parse_value("-7", &FieldType::Int32, loc()).unwrap(),
+        Value::Int32(-7)
+    );
 }
 
 #[test]
 fn test_parse_int_zero() {
-    assert_eq!(parse_value("0", &FieldType::Int32, loc()).unwrap(), Value::Int32(0));
+    assert_eq!(
+        parse_value("0", &FieldType::Int32, loc()).unwrap(),
+        Value::Int32(0)
+    );
 }
 
 #[test]
 fn test_parse_int_large() {
-    assert_eq!(parse_value("9223372036854775807", &FieldType::Int64, loc()).unwrap(),
-        Value::Int64(9223372036854775807));
+    assert_eq!(
+        parse_value("9223372036854775807", &FieldType::Int64, loc()).unwrap(),
+        Value::Int64(9223372036854775807)
+    );
 }
 
 #[test]
 fn test_parse_uint() {
-    assert_eq!(parse_value("42", &FieldType::Uint32, loc()).unwrap(), Value::Uint32(42));
+    assert_eq!(
+        parse_value("42", &FieldType::Uint32, loc()).unwrap(),
+        Value::Uint32(42)
+    );
 }
 
 #[test]
 fn test_parse_uint_zero() {
-    assert_eq!(parse_value("0", &FieldType::Uint32, loc()).unwrap(), Value::Uint32(0));
+    assert_eq!(
+        parse_value("0", &FieldType::Uint32, loc()).unwrap(),
+        Value::Uint32(0)
+    );
 }
 
 #[test]
@@ -58,43 +77,63 @@ fn test_parse_float_integer_form() {
 
 #[test]
 fn test_parse_string_plain() {
-    assert_eq!(parse_value("hello", &FieldType::String, loc()).unwrap(),
-        Value::String("hello".to_string()));
+    assert_eq!(
+        parse_value("hello", &FieldType::String, loc()).unwrap(),
+        Value::String("hello".to_string())
+    );
 }
 
 #[test]
 fn test_parse_string_quoted_single() {
-    assert_eq!(parse_value("'hello'", &FieldType::String, loc()).unwrap(),
-        Value::String("hello".to_string()));
+    assert_eq!(
+        parse_value("'hello'", &FieldType::String, loc()).unwrap(),
+        Value::String("hello".to_string())
+    );
 }
 
 #[test]
 fn test_parse_string_quoted_double() {
-    assert_eq!(parse_value("\"world\"", &FieldType::String, loc()).unwrap(),
-        Value::String("world".to_string()));
+    assert_eq!(
+        parse_value("\"world\"", &FieldType::String, loc()).unwrap(),
+        Value::String("world".to_string())
+    );
 }
 
 #[test]
 fn test_parse_string_empty() {
-    assert_eq!(parse_value("", &FieldType::String, loc()).unwrap(),
-        Value::String("".to_string()));
+    assert_eq!(
+        parse_value("", &FieldType::String, loc()).unwrap(),
+        Value::String("".to_string())
+    );
 }
 
 #[test]
 fn test_parse_bool_true() {
-    assert_eq!(parse_value("true", &FieldType::Bool, loc()).unwrap(), Value::Bool(true));
+    assert_eq!(
+        parse_value("true", &FieldType::Bool, loc()).unwrap(),
+        Value::Bool(true)
+    );
 }
 
 #[test]
 fn test_parse_bool_false() {
-    assert_eq!(parse_value("false", &FieldType::Bool, loc()).unwrap(), Value::Bool(false));
+    assert_eq!(
+        parse_value("false", &FieldType::Bool, loc()).unwrap(),
+        Value::Bool(false)
+    );
 }
 
 #[test]
 fn test_parse_bool_numeric() {
     // Spec §4.2: bool accepts "0"/"1" as well as "true"/"false".
-    assert_eq!(parse_value("1", &FieldType::Bool, loc()).unwrap(), Value::Bool(true));
-    assert_eq!(parse_value("0", &FieldType::Bool, loc()).unwrap(), Value::Bool(false));
+    assert_eq!(
+        parse_value("1", &FieldType::Bool, loc()).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        parse_value("0", &FieldType::Bool, loc()).unwrap(),
+        Value::Bool(false)
+    );
 }
 
 // === Basic types: error cases ===
@@ -139,54 +178,108 @@ fn test_parse_bool_invalid() {
 
 #[test]
 fn test_parse_array_int() {
-    let v = parse_value("[1, 2, 3]", &FieldType::Array { r#type: Box::new(FieldType::Int32) }, loc()).unwrap();
-    assert_eq!(v, Value::Array(vec![
-        Value::Int32(1), Value::Int32(2), Value::Int32(3),
-    ]));
+    let v = parse_value(
+        "[1, 2, 3]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::Int32),
+        },
+        loc(),
+    )
+    .unwrap();
+    assert_eq!(
+        v,
+        Value::Array(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3),])
+    );
 }
 
 #[test]
 fn test_parse_array_string() {
-    let v = parse_value("[hello, world]", &FieldType::Array { r#type: Box::new(FieldType::String) }, loc()).unwrap();
-    assert_eq!(v, Value::Array(vec![
-        Value::String("hello".to_string()),
-        Value::String("world".to_string()),
-    ]));
+    let v = parse_value(
+        "[hello, world]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::String),
+        },
+        loc(),
+    )
+    .unwrap();
+    assert_eq!(
+        v,
+        Value::Array(vec![
+            Value::String("hello".to_string()),
+            Value::String("world".to_string()),
+        ])
+    );
 }
 
 #[test]
 fn test_parse_array_empty() {
-    let v = parse_value("[]", &FieldType::Array { r#type: Box::new(FieldType::Int32) }, loc()).unwrap();
+    let v = parse_value(
+        "[]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::Int32),
+        },
+        loc(),
+    )
+    .unwrap();
     assert_eq!(v, Value::Array(vec![]));
 }
 
 #[test]
 fn test_parse_array_single() {
-    let v = parse_value("[42]", &FieldType::Array { r#type: Box::new(FieldType::Int32) }, loc()).unwrap();
+    let v = parse_value(
+        "[42]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::Int32),
+        },
+        loc(),
+    )
+    .unwrap();
     assert_eq!(v, Value::Array(vec![Value::Int32(42)]));
 }
 
 #[test]
 fn test_parse_array_nested() {
-    let inner = FieldType::Array { r#type: Box::new(FieldType::Int32) };
-    let v = parse_value("[[1,2],[3,4]]", &FieldType::Array { r#type: Box::new(inner) }, loc()).unwrap();
-    assert_eq!(v, Value::Array(vec![
-        Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
-        Value::Array(vec![Value::Int32(3), Value::Int32(4)]),
-    ]));
+    let inner = FieldType::Array {
+        r#type: Box::new(FieldType::Int32),
+    };
+    let v = parse_value(
+        "[[1,2],[3,4]]",
+        &FieldType::Array {
+            r#type: Box::new(inner),
+        },
+        loc(),
+    )
+    .unwrap();
+    assert_eq!(
+        v,
+        Value::Array(vec![
+            Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
+            Value::Array(vec![Value::Int32(3), Value::Int32(4)]),
+        ])
+    );
 }
 
 #[test]
 fn test_parse_array_with_spaces() {
-    let v = parse_value("[ 1 , 2 , 3 ]", &FieldType::Array { r#type: Box::new(FieldType::Int32) }, loc()).unwrap();
-    assert_eq!(v, Value::Array(vec![
-        Value::Int32(1), Value::Int32(2), Value::Int32(3),
-    ]));
+    let v = parse_value(
+        "[ 1 , 2 , 3 ]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::Int32),
+        },
+        loc(),
+    )
+    .unwrap();
+    assert_eq!(
+        v,
+        Value::Array(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3),])
+    );
 }
 
 #[test]
 fn test_parse_array_invalid_format() {
-    let ty = &FieldType::Array { r#type: Box::new(FieldType::Int32) };
+    let ty = &FieldType::Array {
+        r#type: Box::new(FieldType::Int32),
+    };
     assert!(parse_value("1,2,3", ty, loc()).is_err());
     assert!(parse_value("[1,2,3", ty, loc()).is_err());
     assert!(parse_value("1,2,3]", ty, loc()).is_err());
@@ -195,7 +288,13 @@ fn test_parse_array_invalid_format() {
 #[test]
 fn test_parse_array_wrong_inner_type() {
     // Elements must be parseable as the declared inner type
-    let v = parse_value("[abc, def]", &FieldType::Array { r#type: Box::new(FieldType::Int32) }, loc());
+    let v = parse_value(
+        "[abc, def]",
+        &FieldType::Array {
+            r#type: Box::new(FieldType::Int32),
+        },
+        loc(),
+    );
     assert!(v.is_err());
 }
 
@@ -203,12 +302,21 @@ fn test_parse_array_wrong_inner_type() {
 
 #[test]
 fn test_parse_map_int_to_string() {
-    let ty = FieldType::Map { key: Box::new(FieldType::Int32), value: Box::new(FieldType::String) };
+    let ty = FieldType::Map {
+        key: Box::new(FieldType::Int32),
+        value: Box::new(FieldType::String),
+    };
     let v = parse_value("1:one, 2:two", &ty, loc()).unwrap();
     match v {
         Value::Map(m) => {
-            assert_eq!(m.get(&Value::Int32(1)).unwrap(), &Value::String("one".to_string()));
-            assert_eq!(m.get(&Value::Int32(2)).unwrap(), &Value::String("two".to_string()));
+            assert_eq!(
+                m.get(&Value::Int32(1)).unwrap(),
+                &Value::String("one".to_string())
+            );
+            assert_eq!(
+                m.get(&Value::Int32(2)).unwrap(),
+                &Value::String("two".to_string())
+            );
         }
         _ => panic!("Expected Map"),
     }
@@ -216,12 +324,21 @@ fn test_parse_map_int_to_string() {
 
 #[test]
 fn test_parse_map_string_to_int() {
-    let ty = FieldType::Map { key: Box::new(FieldType::String), value: Box::new(FieldType::Int32) };
+    let ty = FieldType::Map {
+        key: Box::new(FieldType::String),
+        value: Box::new(FieldType::Int32),
+    };
     let v = parse_value("k1:1, k2:2", &ty, loc()).unwrap();
     match v {
         Value::Map(m) => {
-            assert_eq!(m.get(&Value::String("k1".to_string())).unwrap(), &Value::Int32(1));
-            assert_eq!(m.get(&Value::String("k2".to_string())).unwrap(), &Value::Int32(2));
+            assert_eq!(
+                m.get(&Value::String("k1".to_string())).unwrap(),
+                &Value::Int32(1)
+            );
+            assert_eq!(
+                m.get(&Value::String("k2".to_string())).unwrap(),
+                &Value::Int32(2)
+            );
         }
         _ => panic!("Expected Map"),
     }
@@ -229,14 +346,20 @@ fn test_parse_map_string_to_int() {
 
 #[test]
 fn test_parse_map_empty() {
-    let ty = FieldType::Map { key: Box::new(FieldType::String), value: Box::new(FieldType::Int32) };
+    let ty = FieldType::Map {
+        key: Box::new(FieldType::String),
+        value: Box::new(FieldType::Int32),
+    };
     let v = parse_value("", &ty, loc()).unwrap();
     assert!(matches!(v, Value::Map(m) if m.is_empty()));
 }
 
 #[test]
 fn test_parse_map_single() {
-    let ty = FieldType::Map { key: Box::new(FieldType::String), value: Box::new(FieldType::String) };
+    let ty = FieldType::Map {
+        key: Box::new(FieldType::String),
+        value: Box::new(FieldType::String),
+    };
     let v = parse_value("key:value", &ty, loc()).unwrap();
     match v {
         Value::Map(m) => {
@@ -248,7 +371,10 @@ fn test_parse_map_single() {
 
 #[test]
 fn test_parse_map_invalid_format() {
-    let ty = FieldType::Map { key: Box::new(FieldType::String), value: Box::new(FieldType::Int32) };
+    let ty = FieldType::Map {
+        key: Box::new(FieldType::String),
+        value: Box::new(FieldType::Int32),
+    };
     let v = parse_value("key", &ty, loc());
     assert!(v.is_err());
 }
@@ -258,8 +384,20 @@ fn test_parse_map_invalid_format() {
 #[test]
 fn test_parse_struct_simple() {
     let fields = vec![
-        Field { name: "x".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
-        Field { name: "y".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
+        Field {
+            name: "x".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
+        Field {
+            name: "y".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
     ];
     let ty = FieldType::Struct { fields };
     let v = parse_value("{x: 100, y: 200}", &ty, loc()).unwrap();
@@ -276,8 +414,20 @@ fn test_parse_struct_simple() {
 fn test_parse_struct_mixed_types() {
     // Order doesn't matter with by-name matching.
     let fields = vec![
-        Field { name: "a".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
-        Field { name: "b".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
+        Field {
+            name: "a".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
+        Field {
+            name: "b".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
     ];
     let ty = FieldType::Struct { fields };
     let v = parse_value("{b: 77, a: 42}", &ty, loc()).unwrap();
@@ -293,20 +443,39 @@ fn test_parse_struct_mixed_types() {
 #[test]
 fn test_parse_struct_wrong_field_count() {
     let fields = vec![
-        Field { name: "x".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
-        Field { name: "y".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
+        Field {
+            name: "x".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
+        Field {
+            name: "y".into(),
+            t: FieldType::Int32,
+            desc: "".into(),
+            constraint: None,
+            tags: vec![],
+        },
     ];
     // Missing y - yields StructFieldCountMismatch
     let ty = FieldType::Struct { fields };
     let err = parse_value("{x: 1}", &ty, loc()).unwrap_err();
-    assert_eq!(err.code, tablec_core::core::diagnostic::DiagnosticCode::StructFieldCountMismatch);
+    assert_eq!(
+        err.code,
+        tablec_core::core::diagnostic::DiagnosticCode::StructFieldCountMismatch
+    );
 }
 
 #[test]
 fn test_parse_struct_invalid_format_no_braces() {
-    let fields = vec![
-        Field { name: "x".into(), t: FieldType::Int32, desc: "".into(), constraint: None, tags: vec![] },
-    ];
+    let fields = vec![Field {
+        name: "x".into(),
+        t: FieldType::Int32,
+        desc: "".into(),
+        constraint: None,
+        tags: vec![],
+    }];
     let ty = FieldType::Struct { fields };
     assert!(parse_value("1", &ty, loc()).is_err());
 }
@@ -315,7 +484,12 @@ fn test_parse_struct_invalid_format_no_braces() {
 
 #[test]
 fn test_parse_with_leading_trailing_spaces() {
-    assert_eq!(parse_value("  42  ", &FieldType::Int32, loc()).unwrap(), Value::Int32(42));
-    assert_eq!(parse_value("  hello  ", &FieldType::String, loc()).unwrap(),
-        Value::String("hello".to_string()));
+    assert_eq!(
+        parse_value("  42  ", &FieldType::Int32, loc()).unwrap(),
+        Value::Int32(42)
+    );
+    assert_eq!(
+        parse_value("  hello  ", &FieldType::String, loc()).unwrap(),
+        Value::String("hello".to_string())
+    );
 }

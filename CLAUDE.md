@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 - **Core**: Excel parsing and table schema validation (`src/core/`)
-- **CLI**: Four commands - build, check, example, and web server (`src/cmd/`)
-- **Export**: JSON, MessagePack, and Protobuf formats (`src/export/`)
-- **Python**: Maturin-based bindings in `pybinding/` directory
+- **CLI**: Three commands - build, check, example (`src/cmd/`)
+- **Export**: JSON and MessagePack formats (`src/export/`)
+- **Python**: Maturin-based bindings in `binding-python/`
 
 ## Build Commands
 
@@ -22,7 +22,6 @@ target/release/tablec --help            # Run CLI help
 target/release/tablec build -i input.xlsx -o output.json
 target/release/tablec check path/to/files
 target/release/tablec example -o example.xlsx -r 10
-target/release/tablec web --listen 127.0.0.1:8080
 ```
 
 ### Python Bindings
@@ -38,24 +37,23 @@ pytest                                  # Run Python tests
 
 - **Excel parser**: Uses `calamine` crate for Excel parsing
 - **Table schema**: Defines constraints and validation rules
-- **Export formats**: JSON (default), MessagePack, Protobuf
+- **Export formats**: JSON (default), MessagePack (Protobuf is not implemented)
 - **Example generator**: Creates sample Excel files with tablec format
-- **Web server**: Basic Actix-web server with hello endpoint
-- **Python API**: `build()` and `check()` functions exposed
+- **Python API**: `build()` and `check()` functions exposed; `build()` accepts `json` (minified) / `json-pretty` (indented) / `msgpack`
 
 ## Development Setup
 
 1. Install Rust 1.60+ (per README.md)
 2. For Python: `pip install maturin`
 3. Build: `cargo build --release`
-4. Test: `cargo test` or `pytest pybinding/tests/`
+4. Test: `cargo test` or `pytest binding-python/tests/`
+5. Enable `cargo fmt` pre-commit hook once: `git config core.hooksPath .githooks`
 
 ## File Structure
 
 - `src/core/table/` - Core table data structures and validation
-- `src/export/` - Format-specific exporters
-- `pybinding/` - Python extension module
-- `proto/` - Protocol buffer definitions
+- `src/export/` - Format-specific exporters (JSON, MessagePack; protobuf is not implemented)
+- `binding-python/` - Python extension module
 
 ## 开发进度管理
 使用 beads 
