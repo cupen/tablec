@@ -18,7 +18,8 @@ def excel_file(temp_dir):
     sheet.append(["id", "name", "age"])
     sheet.append(["int", "string", "int"])
     sheet.append(["#", "#", "#"])
-    sheet.append(["", "", ""]) # Dummy row for constraints
+    sheet.append(["", "", ""]) # Field constraints
+    sheet.append(["@nullable", "", ""]) # Table-level constraint row
     sheet.append([1, "Alice", 20])
     sheet.append([2, "Bob", 22])
     workbook.save(file_path)
@@ -44,5 +45,26 @@ def test_build_function_msgpack(excel_file, temp_dir):
     assert os.path.exists(output_file)
     assert os.path.getsize(output_file) > 0
 
+
 def test_check_function(excel_file):
     tablec.check(str(excel_file))
+
+
+def test_build_json_is_minified_by_default(excel_file, tmp_path):
+    """`json` format produces single-line minified output (matches CLI default)."""
+    output_file = tmp_path / "output.json"
+    tablec.build(str(excel_file), str(output_file), "json")
+    text = output_file.read_text()
+    assert "\n" not in text, f"minified JSON should have no newlines, got: {text!r}"
+    json.loads(text)
+
+
+def test_build_json_pretty_has_indentation(excel_file, tmp_path):
+    """`json-pretty` format produces multi-line indented output."""
+    output_file = tmp_path / "output_pretty.json"
+    tablec.build(str(excel_file), str(output_file), "json-pretty")
+    text = output_file.read_text()
+    assert text.count("\n") >= 2, f"pretty JSON should span multiple lines, got: {text!r}"
+    assert any(line.startswith("    ") for line in text.splitlines()), \
+        f"pretty JSON should contain indented lines, got: {text!r}"
+    json.loads(text)

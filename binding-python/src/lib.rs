@@ -27,21 +27,25 @@ fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
         tables: tables.into_iter().map(|t| (t.name.clone(), t)).collect(),
     };
 
-    match format {
-        "json" => {
-            let json = Json { pretty: true, include_fields: false };
-            let bytes = json.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let bytes: Vec<u8> = match format {
+        "json" => Json { pretty: false, include_fields: false }
+            .to_vec(&project)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        "json-pretty" => Json { pretty: true, include_fields: false }
+            .to_vec(&project)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        "msgpack" => Msgpack
+            .to_vec(&project)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Unsupported format '{}'. Use one of: json, json-pretty, msgpack.",
+                other
+            )));
         }
-        "msgpack" => {
-            let msgpack = Msgpack;
-            let bytes = msgpack.to_vec(&project).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            std::fs::write(output, bytes).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        }
-        _ => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!("Unsupported format '{}'", format)));
-        }
-    }
+    };
+    std::fs::write(output, bytes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
     Ok(())
 }
