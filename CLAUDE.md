@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Core**: Excel parsing and table schema validation (`src/core/`)
 - **CLI**: Three commands - build, check, example (`src/cmd/`)
-- **Export**: JSON, MessagePack, and Protobuf formats (`src/export/`)
+- **Export**: JSON and MessagePack formats (`src/export/`)
 - **Python**: Maturin-based bindings in `binding-python/`
 
 ## Build Commands
@@ -37,7 +37,7 @@ pytest                                  # Run Python tests
 
 - **Excel parser**: Uses `calamine` crate for Excel parsing
 - **Table schema**: Defines constraints and validation rules
-- **Export formats**: JSON (default), MessagePack, Protobuf
+- **Export formats**: JSON (default), MessagePack (Protobuf is not implemented)
 - **Example generator**: Creates sample Excel files with tablec format
 - **Python API**: `build()` and `check()` functions exposed
 
