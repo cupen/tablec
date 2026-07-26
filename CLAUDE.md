@@ -22,6 +22,7 @@ target/release/tablec --help            # Run CLI help
 target/release/tablec build -i input.xlsx -o output.json
 target/release/tablec check path/to/files
 target/release/tablec example -o example.xlsx -r 10
+target/release/tablec build [path]                # build a directory (defaults to cwd); auto-discovers tablec.toml
 ```
 
 ### Python Bindings

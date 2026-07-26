@@ -40,6 +40,25 @@ tablec check path/to/files
 tablec example -o example.xlsx -r 10
 ```
 
+### Build a directory
+
+By default `tablec build` reads the current directory:
+
+```bash
+tablec build                       # build ./tablec.toml or all *.xlsx in cwd
+tablec build ./data                # same, against ./data
+```
+
+If the input directory contains `tablec.toml` (or `.tablec.toml`), it controls
+include patterns, output name, format, and so on. `--config path/to/other.toml`
+overrides auto-discovery.
+
+### Build a single file
+
+```bash
+tablec build -i data/foo.xlsx -o out/foo.json
+```
+
 ## Data Format
 
 Excel Sheet structure (first 5 rows are reserved for schema):
