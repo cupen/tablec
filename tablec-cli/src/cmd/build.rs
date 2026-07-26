@@ -56,23 +56,23 @@ fn validate_table_silent(table: &tablec_core::core::table::table::Table) {
 
 #[derive(Args, Debug)]
 pub struct BuildCommand {
-    /// Input Excel file (if not using config)
+    /// Input Excel file or directory of Excel files. Defaults to current directory if omitted.
     #[arg(short, long)]
     pub input: Option<String>,
 
-    /// Output file (if not using config)
+    /// Output file (merge mode / single-file).
     #[arg(short, long)]
     pub output: Option<String>,
 
-    /// Config file path (default: tablec.toml in current directory)
+    /// Config file path. If omitted in directory mode, the tool searches for `tablec.toml` / `.tablec.toml` inside the input directory.
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Export format: json (minified) | json-pretty (indented) | msgpack
+    /// Export format: json (minified) | json-pretty (indented) | msgpack. Overrides config when given.
     #[arg(long)]
     pub format: Option<String>,
 
-    /// Include field metadata
+    /// Include field metadata. Overrides config when given.
     #[arg(long)]
     pub include_fields: Option<bool>,
 }
@@ -128,7 +128,12 @@ impl BuildCommand {
             Some(c) => c,
             None => match find_tablec_toml(input_dir) {
                 Some(path) => Config::load_from_file(&path)?,
-                None => Config::default(),
+                None => {
+                    if self.output.is_none() {
+                        return Err("missing -o (or tablec.toml in input dir)".into());
+                    }
+                    Config::default()
+                }
             },
         };
 
@@ -599,6 +604,27 @@ output_dir = "."
         let err = cmd.run().expect_err("single file without -o should fail");
         assert!(
             err.to_string().contains("No output file specified"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_dir_mode_no_config_no_output_errors() {
+        // tempdir with 1 xlsx, no tablec.toml, no -o
+        let dir = tempdir().unwrap();
+        write_minimal_xlsx(dir.path(), "only.xlsx");
+
+        let cmd = BuildCommand {
+            input: Some(dir.path().to_string_lossy().into_owned()),
+            output: None,
+            config: None,
+            format: None,
+            include_fields: None,
+        };
+        let err = cmd.run().expect_err("dir mode without config and without -o should fail");
+        assert!(
+            err.to_string().contains("missing -o") || err.to_string().contains("tablec.toml"),
             "unexpected error: {}",
             err
         );
