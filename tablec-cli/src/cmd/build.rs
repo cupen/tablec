@@ -174,6 +174,7 @@ impl BuildCommand {
         include_fields: bool,
         ext: &str,
     ) -> Result<(), Box<dyn Error>> {
+        let _ = ext;
         let total_start = Instant::now();
 
         let parse_start = Instant::now();
