@@ -1,7 +1,7 @@
 use clap::Args;
 use std::error::Error;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tablec_core::core::config::{self, Config};
 use tablec_core::core::project::project::Project;
@@ -20,6 +20,29 @@ fn fmt_duration(d: Duration) -> String {
         format!("{:.0}ms", ms)
     } else {
         format!("{:.1}s", ms / 1000.0)
+    }
+}
+
+/// Look for `tablec.toml` (preferred) or `.tablec.toml` inside `dir`.
+/// Returns the first match, or `None` if neither file exists.
+fn find_tablec_toml(dir: &Path) -> Option<PathBuf> {
+    let plain = dir.join("tablec.toml");
+    if plain.exists() {
+        return Some(plain);
+    }
+    let dotfile = dir.join(".tablec.toml");
+    if dotfile.exists() {
+        return Some(dotfile);
+    }
+    None
+}
+
+/// Map an export format name to its file extension.
+fn ext_for(format: &str) -> &'static str {
+    if format == "msgpack" {
+        "msgpack"
+    } else {
+        "json"
     }
 }
 
@@ -56,102 +79,100 @@ pub struct BuildCommand {
 
 impl BuildCommand {
     pub fn run(&self) -> Result<(), Box<dyn Error>> {
-        // Load configuration
-        let config = Config::load(self.config.as_deref())?;
+        let input_path = self
+            .input
+            .as_deref()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new("."));
 
-        match config {
-            Some(cfg) => self.run_with_config(cfg),
-            None => {
-                // No config file, use CLI arguments only
-                self.run_without_config()
-            }
+        let explicit_cfg = Config::load(self.config.as_deref())?;
+
+        if input_path.is_dir() {
+            self.run_dir(input_path, explicit_cfg)
+        } else if input_path.is_file() {
+            self.run_single(input_path, explicit_cfg)
+        } else {
+            Err(format!("input {:?} is neither a file nor a directory", input_path).into())
         }
     }
 
-    fn run_with_config(&self, cfg: Config) -> Result<(), Box<dyn Error>> {
-        // CLI arguments override config values
+    fn run_single(&self, input: &Path, explicit_cfg: Option<Config>) -> Result<(), Box<dyn Error>> {
+        let cfg = explicit_cfg.unwrap_or_default();
         let format = self.format.clone().unwrap_or(cfg.export.format);
         let include_fields = self
             .include_fields
             .unwrap_or(cfg.export.include_fields.unwrap_or(false));
 
-        // Determine input/output
-        if let (Some(input), Some(output)) = (&self.input, &self.output) {
-            // CLI args take precedence
-            self.build_single_file(input, output, &format, include_fields)?;
-        } else {
-            // Use config values - find all Excel files in input_dir
-            let include = cfg.data.include.clone().unwrap_or_default();
-            let exclude = cfg.data.exclude.clone().unwrap_or_default();
-            let excel_files = config::find_excel_files(&cfg.data.input_dir, &include, &exclude)?;
-
-            if excel_files.is_empty() {
-                return Err(format!(
-                    "No Excel files found in '{}' matching the specified patterns.",
-                    cfg.data.input_dir
-                )
-                .into());
-            }
-
-            if excel_files.len() == 1 {
-                // Single file - use project name as output
-                let input_path = excel_files[0].to_string_lossy();
-                let output = self.output.clone().unwrap_or_else(|| {
-                    format!(
-                        "{}/{}.{}",
-                        cfg.export.output_dir,
-                        cfg.project.name,
-                        if format == "msgpack" {
-                            "msgpack"
-                        } else {
-                            "json"
-                        }
-                    )
-                });
-                self.build_single_file(&input_path, &output, &format, include_fields)?;
-            } else {
-                // Multiple files - merge all tables into single output
-                let output = self.output.clone().unwrap_or_else(|| {
-                    format!(
-                        "{}/{}.{}",
-                        cfg.export.output_dir,
-                        cfg.project.name,
-                        if format == "msgpack" {
-                            "msgpack"
-                        } else {
-                            "json"
-                        }
-                    )
-                });
-                self.build_merged_files(&excel_files, &output, &format, include_fields)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn run_without_config(&self) -> Result<(), Box<dyn Error>> {
-        // Require explicit CLI arguments
-        let input = self
-            .input
-            .as_ref()
-            .ok_or("No input file specified. Use -i <file> or provide a config file.")?;
         let output = self
             .output
             .as_ref()
             .ok_or("No output file specified. Use -o <file> or provide a config file.")?;
-        let format = self.format.clone().unwrap_or_else(|| "json".to_string());
-        let include_fields = self.include_fields.unwrap_or(false);
 
-        self.build_single_file(input, output, &format, include_fields)
+        let input_str = input.to_string_lossy().into_owned();
+        let format_for_ext = format.clone();
+        self.build_single_file_with_ext(
+            &input_str,
+            output,
+            &format,
+            include_fields,
+            ext_for(&format_for_ext),
+        )
     }
 
-    fn build_single_file(
+    fn run_dir(
+        &self,
+        input_dir: &Path,
+        explicit_cfg: Option<Config>,
+    ) -> Result<(), Box<dyn Error>> {
+        let cfg = match explicit_cfg {
+            Some(c) => c,
+            None => match find_tablec_toml(input_dir) {
+                Some(path) => Config::load_from_file(&path)?,
+                None => Config::default(),
+            },
+        };
+
+        let format = self.format.clone().unwrap_or(cfg.export.format);
+        let include_fields = self
+            .include_fields
+            .unwrap_or(cfg.export.include_fields.unwrap_or(false));
+
+        let include = cfg.data.include.clone().unwrap_or_default();
+        let exclude = cfg.data.exclude.clone().unwrap_or_default();
+        let files = config::find_excel_files(&input_dir.to_string_lossy(), &include, &exclude)?;
+
+        if files.is_empty() {
+            return Err(format!(
+                "directory {:?} contains no xlsx files matching config",
+                input_dir
+            )
+            .into());
+        }
+
+        let ext = ext_for(&format).to_string();
+
+        // Output path: from -o if given; else from config's export.output_dir
+        // and project.name; else error.
+        let output_path: PathBuf = match self.output.as_deref() {
+            Some(s) => PathBuf::from(s),
+            None => {
+                let dir = cfg.export.output_dir.as_str();
+                let name = cfg.project.name.as_str();
+                let path = format!("{}/{}.{}", dir, name, ext);
+                PathBuf::from(path)
+            }
+        };
+
+        self.build_merged_files_with_ext(&files, &output_path, &format, include_fields, &ext)
+    }
+
+    fn build_single_file_with_ext(
         &self,
         input: &str,
         output: &str,
         format: &str,
         include_fields: bool,
+        ext: &str,
     ) -> Result<(), Box<dyn Error>> {
         let total_start = Instant::now();
 
@@ -222,13 +243,18 @@ impl BuildCommand {
         Ok(())
     }
 
-    fn build_merged_files(
+    fn build_merged_files_with_ext(
         &self,
         files: &[PathBuf],
-        output: &str,
+        output: &Path,
         format: &str,
         include_fields: bool,
+        ext: &str,
     ) -> Result<(), Box<dyn Error>> {
+        let _ = ext;
+        let output_str = output
+            .to_str()
+            .ok_or_else(|| format!("output path {:?} is not valid UTF-8", output))?;
         let total_start = Instant::now();
 
         // Merge all tables from all files; track per-file parse time and
@@ -278,20 +304,20 @@ impl BuildCommand {
                     pretty: false,
                     include_fields,
                 }
-                .export(&project, output)?;
-                println!("Merged {} tables into {}", project.tables.len(), output);
+                .export(&project, output_str)?;
+                println!("Merged {} tables into {}", project.tables.len(), output_str);
             }
             "json-pretty" => {
                 Json {
                     pretty: true,
                     include_fields,
                 }
-                .export(&project, output)?;
-                println!("Merged {} tables into {}", project.tables.len(), output);
+                .export(&project, output_str)?;
+                println!("Merged {} tables into {}", project.tables.len(), output_str);
             }
             "msgpack" => {
-                Msgpack.export(&project, output)?;
-                println!("Merged tables into {}", output);
+                Msgpack.export(&project, output_str)?;
+                println!("Merged tables into {}", output_str);
             }
             _ => {
                 return Err(format!(
@@ -391,5 +417,189 @@ mod tests {
     fn fmt_duration_seconds() {
         let s = fmt_duration(Duration::from_micros(12_500_000));
         assert_eq!(s, "12.5s");
+    }
+
+    use super::find_tablec_toml;
+    use std::fs;
+
+    #[test]
+    fn find_tablec_toml_prefers_tablec_over_dotfile() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("tablec.toml"), "").unwrap();
+        fs::write(dir.path().join(".tablec.toml"), "").unwrap();
+        let found = find_tablec_toml(dir.path()).unwrap();
+        assert_eq!(found, dir.path().join("tablec.toml"));
+    }
+
+    #[test]
+    fn find_tablec_toml_falls_back_to_dotfile() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".tablec.toml"), "").unwrap();
+        let found = find_tablec_toml(dir.path()).unwrap();
+        assert_eq!(found, dir.path().join(".tablec.toml"));
+    }
+
+    #[test]
+    fn find_tablec_toml_returns_none_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_tablec_toml(dir.path()).is_none());
+    }
+
+    use super::{BuildCommand, ext_for};
+    use rust_xlsxwriter::Workbook;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn write_minimal_xlsx(dir: &std::path::Path, name: &str) -> PathBuf {
+        write_minimal_xlsx_with_sheet(dir, name, "Sheet1")
+    }
+
+    fn write_minimal_xlsx_with_sheet(
+        dir: &std::path::Path,
+        name: &str,
+        sheet_name: &str,
+    ) -> PathBuf {
+        let path = dir.join(name);
+        let mut wb = Workbook::new();
+        let sheet = wb.add_worksheet();
+        sheet.set_name(sheet_name).ok();
+        sheet.write_string(0, 0, "field").ok();
+        sheet.write_string(0, 1, "name").ok();
+        sheet.write_string(0, 2, "value").ok();
+        sheet.write_string(1, 0, "int").ok();
+        sheet.write_string(1, 1, "string").ok();
+        sheet.write_string(1, 2, "int").ok();
+        // Row 2 (data)
+        sheet.write_string(2, 0, "id").ok();
+        sheet.write_string(2, 1, "alice").ok();
+        sheet.write_number(2, 2, 1.0).ok();
+        wb.save(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn ext_for_msgpack() {
+        assert_eq!(ext_for("msgpack"), "msgpack");
+    }
+
+    #[test]
+    fn ext_for_json() {
+        assert_eq!(ext_for("json"), "json");
+    }
+
+    #[test]
+    fn ext_for_json_pretty() {
+        assert_eq!(ext_for("json-pretty"), "json");
+    }
+
+    #[test]
+    fn test_dir_mode_uses_default_when_no_config() {
+        let dir = tempdir().unwrap();
+        write_minimal_xlsx_with_sheet(dir.path(), "a.xlsx", "SheetA");
+        write_minimal_xlsx_with_sheet(dir.path(), "b.xlsx", "SheetB");
+        fs::write(dir.path().join("notes.csv"), "ignore me").unwrap();
+
+        let cmd = BuildCommand {
+            input: Some(dir.path().to_string_lossy().into_owned()),
+            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            config: None,
+            format: None,
+            include_fields: None,
+        };
+        cmd.run().expect("dir mode build should succeed");
+
+        // One merged output file containing both sheets
+        let out_text = fs::read_to_string(dir.path().join("out.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out_text).unwrap();
+        let tables = parsed
+            .get("tables")
+            .and_then(|v| v.as_array())
+            .expect("tables array");
+        assert_eq!(tables.len(), 2, "expected 2 tables, got: {}", out_text);
+        let names: Vec<&str> = tables
+            .iter()
+            .map(|t| t.get("name").and_then(|n| n.as_str()).unwrap_or(""))
+            .collect();
+        assert!(names.contains(&"SheetA") && names.contains(&"SheetB"));
+    }
+
+    #[test]
+    fn test_dir_mode_auto_discovers_tablec_toml() {
+        let dir = tempdir().unwrap();
+        write_minimal_xlsx_with_sheet(dir.path(), "only.xlsx", "Only");
+        write_minimal_xlsx_with_sheet(dir.path(), "ignored.xlsx", "Ignored");
+        fs::write(
+            dir.path().join("tablec.toml"),
+            r#"
+[project]
+name = "auto"
+
+[data]
+input_dir = "."
+
+[export]
+format = "json"
+output_dir = "."
+"#,
+        )
+        .unwrap();
+
+        // Without -o, should write to ./auto.json in cwd; use -o to scope output
+        let cmd = BuildCommand {
+            input: Some(dir.path().to_string_lossy().into_owned()),
+            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            config: None,
+            format: None,
+            include_fields: None,
+        };
+        cmd.run().expect("dir mode build should succeed");
+
+        let out_text = fs::read_to_string(dir.path().join("out.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out_text).unwrap();
+        let tables = parsed
+            .get("tables")
+            .and_then(|v| v.as_array())
+            .expect("tables array");
+        assert!(tables.len() >= 1);
+    }
+
+    #[test]
+    fn test_dir_mode_errors_when_no_xlsx() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("readme.txt"), "no xlsx here").unwrap();
+
+        let cmd = BuildCommand {
+            input: Some(dir.path().to_string_lossy().into_owned()),
+            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            config: None,
+            format: None,
+            include_fields: None,
+        };
+        let err = cmd.run().expect_err("should fail with no xlsx files");
+        assert!(
+            err.to_string().contains("no xlsx"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_single_file_still_requires_output() {
+        let dir = tempdir().unwrap();
+        let xlsx = write_minimal_xlsx(dir.path(), "foo.xlsx");
+
+        let cmd = BuildCommand {
+            input: Some(xlsx.to_string_lossy().into_owned()),
+            output: None,
+            config: None,
+            format: None,
+            include_fields: None,
+        };
+        let err = cmd.run().expect_err("single file without -o should fail");
+        assert!(
+            err.to_string().contains("No output file specified"),
+            "unexpected error: {}",
+            err
+        );
     }
 }
