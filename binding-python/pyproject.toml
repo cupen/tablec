@@ -3,23 +3,49 @@ requires = ["maturin>=1.9.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "tablec-python"
+name = "tablec"
 version = "0.1.0"
+description = "Python bindings for tablec — a Rust-based table compiler for gamedev (Excel/CSV/JSON -> JSON/MessagePack)"
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "cupen", email = "xcupen@gmail.com" },
+]
+keywords = ["tablec", "excel", "gamedev", "table", "compiler", "msgpack"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Games/Entertainment",
 ]
 dependencies = [
     "openpyxl>=3.1.5",
 ]
 
+[project.urls]
+Homepage = "https://github.com/cupen/tablec"
+Repository = "https://github.com/cupen/tablec"
+Documentation = "https://github.com/cupen/tablec#readme"
+Issues = "https://github.com/cupen/tablec/issues"
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "tablec._native"
 python-source = "."
-
+strip = true
 
 [dependency-groups]
 dev = [
