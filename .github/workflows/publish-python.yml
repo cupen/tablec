@@ -1,0 +1,120 @@
+name: publish-python
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-wheel:
+    name: Build wheel (linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: binding-python -> ../target
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install maturin
+        run: pip install "maturin>=1.9.0,<2.0"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build wheel
+        working-directory: binding-python
+        run: maturin build --release --strip --compatibility manylinux2014 --out dist/wheels
+
+      - name: Show built artifacts
+        working-directory: binding-python
+        run: ls -lh dist/wheels/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels
+          path: binding-python/dist/wheels/*.whl
+          if-no-files-found: error
+
+  attach-release:
+    name: Attach wheel to GitHub Release
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-wheels
+          path: dist
+
+      - name: Install gh
+        run: type gh || (apt-get update -qq && apt-get install -y -qq gh)
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty')
+            if [ -z "$TAG" ]; then
+              echo "::error::workflow_dispatch: no existing release found; push a v* tag first"
+              exit 1
+            fi
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for release.yml to create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          echo "Waiting for release $TAG to be created by release.yml ..."
+          for i in $(seq 1 40); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG exists."
+              exit 0
+            fi
+            echo "  attempt $i/40 — not yet, sleeping 15s"
+            sleep 15
+          done
+          echo "::error::Release $TAG not found after 10 minutes"
+          exit 1
+
+      - name: Upload wheel to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ ${#wheels[@]} -eq 0 ]; then
+            echo "::error::No wheels downloaded"
+            exit 1
+          fi
+          echo "Uploading: ${wheels[*]}"
+          gh release upload "$TAG" "${wheels[@]}" --clobber
