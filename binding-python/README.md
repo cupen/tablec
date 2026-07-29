@@ -12,13 +12,13 @@ cd binding-python
 uv sync
 
 # Build the Rust extension
-uv matisin develop
+uv run maturin develop
 ```
 
 ### From wheel (future)
 
 ```bash
-pip install tablec-python
+pip install tablec
 ```
 
 ## Usage
@@ -115,10 +115,10 @@ uv run pytest tests/test_python_binding.py -v
 
 ```bash
 # Build release wheel
-uv maturin build --release
+uv run maturin build --release
 
 # Build for multiple Python versions
-uv maturin build --release --strip --compatibility manylinux
+uv run maturin build --release --strip --compatibility manylinux
 ```
 
 ## Error Handling
@@ -129,6 +129,19 @@ try:
 except Exception as e:
     print(f"Validation failed: {e}")
 ```
+
+## Import name vs package name
+
+The package published to PyPI is `tablec`. The Python import name is also `tablec`
+(PEP 421 allows the two to differ, but here they match on purpose):
+
+```bash
+pip install tablec
+python -c "import tablec; tablec.check('your.xlsx')"
+```
+
+If you `pip install` a checkout of this repo, the editable install uses the
+project's `name` (`tablec`) — `import tablec` is the canonical import.
 
 ## License
 
