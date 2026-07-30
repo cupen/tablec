@@ -71,6 +71,24 @@ Excel Sheet structure (first 5 rows are reserved for schema):
 | 4 | Constraints |
 | 5 | Reserved |
 
+## 自定义头布局
+
+如果你的 Excel/CSV 头不是 5 行标准布局（行数不同、字段名/类型不同行），写一个 plugin 接管：
+
+```rust
+use tablec_core::core::schema::{Schema, SchemaParser, SchemaParseResult};
+
+pub struct MyParser;
+impl SchemaParser for MyParser {
+    fn name(&self) -> &str { "my-parser" }
+    fn parse_schema(&self, sheet_name: &str, sheet: &[Vec<String>]) -> Result<SchemaParseResult, Vec<Diagnostic>> {
+        // 你的解析逻辑
+    }
+}
+```
+
+详细文档见 `doc/design.md#插件机制`。
+
 ## Type System
 
 ### Basic Types

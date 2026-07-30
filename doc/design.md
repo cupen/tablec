@@ -202,7 +202,7 @@ FK 字段也用 `@nullable` 取消"必须引用存在"的非空强制；host 为
         pub build_at: i64,
     }
     ```
-2. table 
+2. table
     ```rust
     #[derive(Debug, Serialize)]
     pub struct Table {
@@ -212,3 +212,20 @@ FK 字段也用 `@nullable` 取消"必须引用存在"的非空强制；host 为
         pub constraints: Vec<constraint::Constraint>,
     }
     ```
+
+## 插件机制
+
+tablec 通过 `SchemaParser` trait 暴露插件接口。用户实现该 trait 即可接管"sheet 单元格 → Schema"路径。
+
+- 默认 plugin `StandardSchemaParser` 保留 5 行布局：字段名 / 字段类型 / 字段注释 / 字段约束 / 表约束，第 6 行起数据。
+- 自定义 plugin 实现 `SchemaParser`：
+  - 静态：`SchemaParserRegistry::register(MyParser)`（同进程）
+  - 动态：编译为 `[lib] crate-type = ["cdylib"]`，导出 `tablec_plugin_create_v1` / `tablec_plugin_drop_v1`，tablec 运行时通过 `libloading` 加载
+- 入口选 parser：
+  - 静态 config：`tablec.toml [parser] name = "..."`
+  - 动态 config：`tablec.toml [[plugins]] path = "./parser.so"`
+  - CLI：`tablec build --parser NAME --plugin-path ./parser.so`
+  - Python：`tablec.build(input, output, parser="...")`
+- 注意：动态 plugin 与 host 必须用相同 Rust 工具链编译（Rust ABI 不稳定）
+
+详细 API 见 `tablec-core/src/core/schema.rs`。
