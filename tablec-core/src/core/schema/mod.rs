@@ -341,6 +341,25 @@ impl SchemaParserRegistry {
         r
     }
 
+    pub fn with_standard_and_plugins(
+        plugin_paths: &[std::path::PathBuf],
+    ) -> Result<Self, crate::core::schema::dynamic::DynamicPluginError> {
+        let mut reg = Self::with_standard();
+        for path in plugin_paths {
+            let plugin = unsafe { crate::core::schema::dynamic::DynamicPlugin::load(path) }?;
+            reg.register_arc(plugin);
+        }
+        Ok(reg)
+    }
+
+    pub fn register_arc(&mut self, parser: Arc<dyn SchemaParser>) {
+        let name = parser.name().to_string();
+        if self.parsers.contains_key(&name) {
+            panic!("parser '{}' already registered", name);
+        }
+        self.parsers.insert(name, parser);
+    }
+
     pub fn register<P: SchemaParser + 'static>(&mut self, parser: P) {
         let name = parser.name().to_string();
         if self.parsers.contains_key(&name) {
@@ -376,5 +395,25 @@ mod registry_tests {
     fn register_same_name_panics() {
         let mut reg = SchemaParserRegistry::with_standard();
         reg.register(StandardSchemaParser);
+    }
+}
+
+#[cfg(test)]
+mod with_plugins_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn empty_paths_yields_standard_only() {
+        let reg = SchemaParserRegistry::with_standard_and_plugins(&[]).unwrap();
+        assert!(reg.get("standard").is_some());
+        assert_eq!(reg.parser_names(), vec!["standard".to_string()]);
+    }
+
+    #[test]
+    fn nonexistent_plugin_path_yields_error() {
+        let paths = vec![PathBuf::from("/tmp/tablec_no_such_plugin_xyz.so")];
+        let r = SchemaParserRegistry::with_standard_and_plugins(&paths);
+        assert!(r.is_err());
     }
 }
