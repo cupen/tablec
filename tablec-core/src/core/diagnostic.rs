@@ -40,6 +40,9 @@ pub enum DiagnosticCode {
     ConstraintPatternMismatch,
     ConstraintNullNotAllowed,
     ConstraintForeignKeyViolation,
+    HeaderParserError,
+    SchemaFieldOverlap,
+    SchemaDataStartOOB,
     Other,
 }
 
@@ -168,9 +171,43 @@ mod tests {
             DiagnosticCode::ConstraintPatternMismatch,
             DiagnosticCode::ConstraintNullNotAllowed,
             DiagnosticCode::ConstraintForeignKeyViolation,
+            DiagnosticCode::HeaderParserError,
+            DiagnosticCode::SchemaFieldOverlap,
+            DiagnosticCode::SchemaDataStartOOB,
             DiagnosticCode::Other,
         ];
         // Intentionally asserts total variants — change ONLY when adding/removing a code.
-        assert_eq!(codes.len(), 23);
+        assert_eq!(codes.len(), 26);
+    }
+
+    #[test]
+    fn header_parser_error_exists() {
+        let d = Diagnostic::new(
+            DiagnosticCode::HeaderParserError,
+            "snippet".to_string(),
+            SourceLocation::default(),
+        );
+        assert_eq!(d.code, DiagnosticCode::HeaderParserError);
+        assert_eq!(d.message, "snippet");
+    }
+
+    #[test]
+    fn schema_field_overlap_exists() {
+        let d = Diagnostic::new(
+            DiagnosticCode::SchemaFieldOverlap,
+            "duplicate field".to_string(),
+            SourceLocation::default(),
+        );
+        assert_eq!(d.code, DiagnosticCode::SchemaFieldOverlap);
+    }
+
+    #[test]
+    fn schema_data_start_oob_exists() {
+        let d = Diagnostic::new(
+            DiagnosticCode::SchemaDataStartOOB,
+            "data_start_row out of bounds".to_string(),
+            SourceLocation::default(),
+        );
+        assert_eq!(d.code, DiagnosticCode::SchemaDataStartOOB);
     }
 }
