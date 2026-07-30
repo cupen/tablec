@@ -6,6 +6,8 @@ use super::table::field::Field;
 use serde::{Deserialize, Serialize};
 
 pub mod dynamic;
+#[cfg(any(test, doc))]
+pub mod example;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Schema {
