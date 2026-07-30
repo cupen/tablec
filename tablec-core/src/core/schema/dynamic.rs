@@ -28,9 +28,9 @@ impl fmt::Display for DynamicPluginError {
                 e
             ),
             DynamicPluginError::NullPointer => write!(f, "plugin returned null pointer"),
-            DynamicPluginError::DuplicateName(name) => write!(
-                f, "plugin name '{}' already registered", name
-            ),
+            DynamicPluginError::DuplicateName(name) => {
+                write!(f, "plugin name '{}' already registered", name)
+            }
         }
     }
 }

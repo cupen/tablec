@@ -20,6 +20,10 @@ pub struct CheckCommand {
     /// Falls back to "standard" if neither is set.
     #[arg(long)]
     pub parser: Option<String>,
+
+    /// Additional schema parser plugin library path. May be repeated.
+    #[arg(long = "plugin-path", value_name = "PATH")]
+    pub plugin_paths: Vec<String>,
 }
 
 impl CheckCommand {
@@ -38,7 +42,14 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
 
     // Resolve schema parser (cli > config > "standard").
     let parser_cfg = config.clone().unwrap_or_default();
-    let _parser = crate::parser_resolve::resolve_parser(&parser_cfg, c.parser.as_deref());
+    let plugin_paths: Vec<PathBuf> = parser_cfg
+        .plugins
+        .iter()
+        .map(|plugin| PathBuf::from(&plugin.path))
+        .chain(c.plugin_paths.iter().map(PathBuf::from))
+        .collect();
+    let _parser =
+        crate::parser_resolve::resolve_parser(&parser_cfg, c.parser.as_deref(), &plugin_paths);
 
     let path = if let Some(p) = c.path {
         // CLI path takes precedence

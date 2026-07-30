@@ -80,6 +80,10 @@ pub struct BuildCommand {
     /// Falls back to "standard" if neither is set.
     #[arg(long)]
     pub parser: Option<String>,
+
+    /// Additional schema parser plugin library path. May be repeated.
+    #[arg(long = "plugin-path", value_name = "PATH")]
+    pub plugin_paths: Vec<String>,
 }
 
 impl BuildCommand {
@@ -111,7 +115,14 @@ impl BuildCommand {
             .include_fields
             .unwrap_or(cfg.export.include_fields.unwrap_or(false));
 
-        let _parser = crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref());
+        let plugin_paths: Vec<PathBuf> = cfg
+            .plugins
+            .iter()
+            .map(|plugin| PathBuf::from(&plugin.path))
+            .chain(self.plugin_paths.iter().map(PathBuf::from))
+            .collect();
+        let _parser =
+            crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref(), &plugin_paths);
 
         let output = self
             .output
@@ -159,7 +170,14 @@ impl BuildCommand {
         let exclude = cfg.data.exclude.clone().unwrap_or_default();
         let files = config::find_excel_files(&input_dir.to_string_lossy(), &include, &exclude)?;
 
-        let _parser = crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref());
+        let plugin_paths: Vec<PathBuf> = cfg
+            .plugins
+            .iter()
+            .map(|plugin| PathBuf::from(&plugin.path))
+            .chain(self.plugin_paths.iter().map(PathBuf::from))
+            .collect();
+        let _parser =
+            crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref(), &plugin_paths);
 
         if files.is_empty() {
             return Err(format!(
@@ -529,6 +547,7 @@ mod tests {
             format: None,
             include_fields: None,
             parser: None,
+            plugin_paths: Vec::new(),
         };
         cmd.run().expect("dir mode build should succeed");
 
@@ -576,6 +595,7 @@ output_dir = "."
             format: None,
             include_fields: None,
             parser: None,
+            plugin_paths: Vec::new(),
         };
         cmd.run().expect("dir mode build should succeed");
 
@@ -600,6 +620,7 @@ output_dir = "."
             format: None,
             include_fields: None,
             parser: None,
+            plugin_paths: Vec::new(),
         };
         let err = cmd.run().expect_err("should fail with no xlsx files");
         assert!(
@@ -621,6 +642,7 @@ output_dir = "."
             format: None,
             include_fields: None,
             parser: None,
+            plugin_paths: Vec::new(),
         };
         let err = cmd.run().expect_err("single file without -o should fail");
         assert!(
@@ -643,6 +665,7 @@ output_dir = "."
             format: None,
             include_fields: None,
             parser: None,
+            plugin_paths: Vec::new(),
         };
         let err = cmd
             .run()

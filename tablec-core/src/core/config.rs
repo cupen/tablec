@@ -7,11 +7,18 @@ pub struct Config {
     pub data: DataConfig,
     pub export: ExportConfig,
     pub parser: Option<ParserConfig>,
+    #[serde(default)]
+    pub plugins: Vec<PluginConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ParserConfig {
     pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PluginConfig {
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +63,7 @@ impl Default for Config {
                 include_fields: Some(false),
             },
             parser: None,
+            plugins: Vec::new(),
         }
     }
 }
@@ -187,5 +195,30 @@ name = "my-parser"
 "#;
         let c: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(c.parser.unwrap().name, "my-parser");
+    }
+
+    #[test]
+    fn parse_toml_with_plugins_array() {
+        let toml_str = r#"
+[project]
+name = "x"
+
+[data]
+input_dir = "data"
+
+[export]
+format = "json"
+output_dir = "out"
+
+[[plugins]]
+path = "./libfoo.so"
+
+[[plugins]]
+path = "./libbar.so"
+"#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(c.plugins.len(), 2);
+        assert_eq!(c.plugins[0].path, "./libfoo.so");
+        assert_eq!(c.plugins[1].path, "./libbar.so");
     }
 }
