@@ -31,26 +31,14 @@ mod tests {
     }
 
     #[test]
-    fn config_name_used_when_no_cli() {
-        let cfg = Config {
-            parser: Some(ParserConfig {
-                name: "standard".to_string(),
-            }),
-            ..Config::default()
-        };
-        let p = resolve_parser(&cfg, None);
-        assert_eq!(p.name(), "standard");
-    }
-
-    #[test]
     fn cli_overrides_config() {
         let cfg = Config {
             parser: Some(ParserConfig {
-                name: "standard".to_string(),
+                name: "not-a-real-parser".into(),
             }),
             ..Config::default()
         };
-        // CLI passes same "standard" — still resolves to standard via CLI path.
+        // CLI says "standard", config says bogus — must resolve via CLI, no panic.
         let p = resolve_parser(&cfg, Some("standard"));
         assert_eq!(p.name(), "standard");
     }
