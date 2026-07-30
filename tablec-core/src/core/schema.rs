@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use super::table::constraint::Constraint;
 use super::table::field::Field;
 use serde::{Deserialize, Serialize};
@@ -320,5 +323,56 @@ impl SchemaParser for StandardSchemaParser {
             constraints: table_constraints,
             data_start_row: 5,
         }))
+    }
+}
+
+pub struct SchemaParserRegistry {
+    parsers: HashMap<String, Arc<dyn SchemaParser>>,
+}
+
+impl SchemaParserRegistry {
+    pub fn with_standard() -> Self {
+        let mut r = Self {
+            parsers: HashMap::new(),
+        };
+        r.register(StandardSchemaParser);
+        r
+    }
+
+    pub fn register<P: SchemaParser + 'static>(&mut self, parser: P) {
+        let name = parser.name().to_string();
+        if self.parsers.contains_key(&name) {
+            panic!("parser '{}' already registered", name);
+        }
+        self.parsers.insert(name, Arc::new(parser));
+    }
+
+    pub fn get(&self, name: &str) -> Option<Arc<dyn SchemaParser>> {
+        self.parsers.get(name).cloned()
+    }
+
+    pub fn parser_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.parsers.keys().cloned().collect();
+        v.sort();
+        v
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn with_standard_contains_standard() {
+        let reg = SchemaParserRegistry::with_standard();
+        assert!(reg.get("standard").is_some());
+        assert!(reg.parser_names().contains(&"standard".to_string()));
+    }
+
+    #[test]
+    #[should_panic(expected = "parser 'standard' already registered")]
+    fn register_same_name_panics() {
+        let mut reg = SchemaParserRegistry::with_standard();
+        reg.register(StandardSchemaParser);
     }
 }
