@@ -469,16 +469,18 @@ mod tests {
         let mut wb = Workbook::new();
         let sheet = wb.add_worksheet();
         sheet.set_name(sheet_name).ok();
-        sheet.write_string(0, 0, "field").ok();
+        // Standard 5-row schema: field names, types, comments, constraints, table constraints.
+        sheet.write_string(0, 0, "id").ok();
         sheet.write_string(0, 1, "name").ok();
         sheet.write_string(0, 2, "value").ok();
         sheet.write_string(1, 0, "int").ok();
         sheet.write_string(1, 1, "string").ok();
         sheet.write_string(1, 2, "int").ok();
-        // Row 2 (data)
-        sheet.write_string(2, 0, "id").ok();
-        sheet.write_string(2, 1, "alice").ok();
-        sheet.write_number(2, 2, 1.0).ok();
+        // Row 2: comments (empty), Row 3: constraints (empty), Row 4: table constraints (empty)
+        // Row 5 (index 5): data
+        sheet.write_number(5, 0, 1.0).ok();
+        sheet.write_string(5, 1, "alice").ok();
+        sheet.write_number(5, 2, 100.0).ok();
         wb.save(&path).unwrap();
         path
     }
@@ -622,7 +624,9 @@ output_dir = "."
             format: None,
             include_fields: None,
         };
-        let err = cmd.run().expect_err("dir mode without config and without -o should fail");
+        let err = cmd
+            .run()
+            .expect_err("dir mode without config and without -o should fail");
         assert!(
             err.to_string().contains("missing -o") || err.to_string().contains("tablec.toml"),
             "unexpected error: {}",
