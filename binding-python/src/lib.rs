@@ -1,13 +1,16 @@
+use std::sync::Arc;
+
 use pyo3::Bound;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::project::project::Project;
+use tablec_core::core::schema::{SchemaParser, SchemaParserRegistry};
 use tablec_core::core::table::table::Table;
 use tablec_core::export::{Format, Json, Msgpack};
 
-fn read_excel_or_pyerr(input: &str) -> PyResult<Vec<Table>> {
-    tablec_core::core::table::table::read_excel(input).map_err(|errs| {
+fn read_excel_with_parser(input: &str, parser: Arc<dyn SchemaParser>) -> PyResult<Vec<Table>> {
+    tablec_core::core::table::table::read_excel_with(input, parser.as_ref()).map_err(|errs| {
         let msg = errs
             .iter()
             .map(|d| d.to_string())
@@ -17,9 +20,27 @@ fn read_excel_or_pyerr(input: &str) -> PyResult<Vec<Table>> {
     })
 }
 
+fn resolve_parser(parser: Option<&str>) -> Arc<dyn SchemaParser> {
+    let parser_name = parser.unwrap_or("standard");
+    SchemaParserRegistry::with_standard()
+        .get(parser_name)
+        .unwrap_or_else(|| panic!("parser '{}' not registered", parser_name))
+}
+
 #[pyfunction]
-fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
-    let tables = read_excel_or_pyerr(input)?;
+#[pyo3(signature = (input, output=None, format=None, parser=None))]
+fn build(
+    input: &str,
+    output: Option<&str>,
+    format: Option<&str>,
+    parser: Option<&str>,
+) -> PyResult<()> {
+    let output = output
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("output is required".to_string()))?;
+    let format = format
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("format is required".to_string()))?;
+    let parser_arc = resolve_parser(parser);
+    let tables = read_excel_with_parser(input, parser_arc)?;
 
     let project = Project {
         name: std::path::Path::new(input)
@@ -67,8 +88,10 @@ fn build(input: &str, output: &str, format: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn check(input: &str) -> PyResult<()> {
-    let tables = read_excel_or_pyerr(input)?;
+#[pyo3(signature = (input, parser=None))]
+fn check(input: &str, parser: Option<&str>) -> PyResult<()> {
+    let parser_arc = resolve_parser(parser);
+    let tables = read_excel_with_parser(input, parser_arc)?;
 
     for table in &tables {
         if let Err(errs) = table.validate_constraints() {
