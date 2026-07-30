@@ -20,11 +20,16 @@ fn read_excel_with_parser(input: &str, parser: Arc<dyn SchemaParser>) -> PyResul
     })
 }
 
-fn resolve_parser(parser: Option<&str>) -> Arc<dyn SchemaParser> {
+fn resolve_parser(parser: Option<&str>) -> PyResult<Arc<dyn SchemaParser>> {
     let parser_name = parser.unwrap_or("standard");
     SchemaParserRegistry::with_standard()
         .get(parser_name)
-        .unwrap_or_else(|| panic!("parser '{}' not registered", parser_name))
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "parser '{}' not registered",
+                parser_name
+            ))
+        })
 }
 
 #[pyfunction]
@@ -39,7 +44,7 @@ fn build(
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("output is required".to_string()))?;
     let format = format
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("format is required".to_string()))?;
-    let parser_arc = resolve_parser(parser);
+    let parser_arc = resolve_parser(parser)?;
     let tables = read_excel_with_parser(input, parser_arc)?;
 
     let project = Project {
@@ -90,7 +95,7 @@ fn build(
 #[pyfunction]
 #[pyo3(signature = (input, parser=None))]
 fn check(input: &str, parser: Option<&str>) -> PyResult<()> {
-    let parser_arc = resolve_parser(parser);
+    let parser_arc = resolve_parser(parser)?;
     let tables = read_excel_with_parser(input, parser_arc)?;
 
     for table in &tables {
