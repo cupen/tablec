@@ -1,5 +1,6 @@
 pub mod core;
 pub mod export;
+pub mod test_support;
 
 // Re-export the main types for easier access
 pub use core::diagnostic::*;

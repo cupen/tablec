@@ -38,5 +38,9 @@ path = "tests/fixtures/error_cases/build_bad_struct_field.rs"
 name = "build_bad_unique"
 path = "tests/fixtures/error_cases/build_bad_unique.rs"
 
+[[example]]
+name = "build_fixture_xlsx"
+path = "tests/fixtures/cdylib_parser/build_fixture_xlsx.rs"
+
 # [build-dependencies]
 # prost-build = "0.14.1"
