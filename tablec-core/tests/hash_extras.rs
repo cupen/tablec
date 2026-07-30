@@ -1,6 +1,7 @@
 use tablec_core::core::project::project::Project;
 
 fn build_project(rows: Vec<Vec<(&str, tablec_core::core::table::value::Value)>>) -> Project {
+    use tablec_core::core::schema::Schema;
     use tablec_core::core::table::field::{Field, FieldType};
     use tablec_core::core::table::row::Row;
     use tablec_core::core::table::table::Table;
@@ -32,9 +33,8 @@ fn build_project(rows: Vec<Vec<(&str, tablec_core::core::table::value::Value)>>)
         "p".into(),
         vec![Table {
             name: "S".into(),
-            fields: vec![field_a, field_b],
+            schema: Schema::from_parts(vec![field_a, field_b], vec![]),
             data,
-            constraints: vec![],
         }],
     )
 }

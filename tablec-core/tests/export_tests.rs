@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::project::project::Project;
+use tablec_core::core::schema::Schema;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
 use tablec_core::core::table::table::Table;
@@ -12,29 +13,32 @@ fn make_simple_project() -> Project {
         "heroes".to_string(),
         Table {
             name: "heroes".to_string(),
-            fields: vec![
-                Field {
-                    name: "id".to_string(),
-                    t: FieldType::Int32,
-                    desc: "hero id".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                },
-                Field {
-                    name: "name".to_string(),
-                    t: FieldType::String,
-                    desc: "hero name".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                },
-                Field {
-                    name: "level".to_string(),
-                    t: FieldType::Int32,
-                    desc: "hero level".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                },
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    Field {
+                        name: "id".to_string(),
+                        t: FieldType::Int32,
+                        desc: "hero id".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    },
+                    Field {
+                        name: "name".to_string(),
+                        t: FieldType::String,
+                        desc: "hero name".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    },
+                    Field {
+                        name: "level".to_string(),
+                        t: FieldType::Int32,
+                        desc: "hero level".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    },
+                ],
+                vec![],
+            ),
             data: vec![
                 Row::from_vec(vec![
                     ("id".to_string(), Value::Int32(1)),
@@ -47,7 +51,6 @@ fn make_simple_project() -> Project {
                     ("level".to_string(), Value::Int32(8)),
                 ]),
             ],
-            constraints: vec![],
         },
     )]);
 
@@ -178,7 +181,7 @@ fn test_msgpack_export_roundtrip() {
     let heroes = &decoded.tables["heroes"];
     assert_eq!(heroes.name, "heroes");
     assert_eq!(heroes.data.len(), 2);
-    assert_eq!(heroes.fields.len(), 3);
+    assert_eq!(heroes.schema.fields.len(), 3);
 }
 
 #[test]
@@ -208,33 +211,37 @@ fn test_msgpack_export_multi_table() {
             "table_a".to_string(),
             Table {
                 name: "table_a".to_string(),
-                fields: vec![Field {
-                    name: "x".to_string(),
-                    t: FieldType::Int32,
-                    desc: "".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                }],
+                schema: Schema::from_parts(
+                    vec![Field {
+                        name: "x".to_string(),
+                        t: FieldType::Int32,
+                        desc: "".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    }],
+                    vec![],
+                ),
                 data: vec![Row::from_vec(vec![("x".to_string(), Value::Int32(1))])],
-                constraints: vec![],
             },
         ),
         (
             "table_b".to_string(),
             Table {
                 name: "table_b".to_string(),
-                fields: vec![Field {
-                    name: "y".to_string(),
-                    t: FieldType::String,
-                    desc: "".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                }],
+                schema: Schema::from_parts(
+                    vec![Field {
+                        name: "y".to_string(),
+                        t: FieldType::String,
+                        desc: "".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    }],
+                    vec![],
+                ),
                 data: vec![Row::from_vec(vec![(
                     "y".to_string(),
                     Value::String("hello".to_string()),
                 )])],
-                constraints: vec![],
             },
         ),
     ]);
@@ -267,7 +274,7 @@ fn test_json_export_all_value_types() {
         "all_types".to_string(),
         Table {
             name: "all_types".to_string(),
-            fields: vec![],
+            schema: Schema::from_parts(vec![], vec![]),
             data: vec![Row::from_vec(vec![
                 ("int_val".to_string(), Value::Int32(42)),
                 ("uint_val".to_string(), Value::Uint32(100)),
@@ -280,7 +287,6 @@ fn test_json_export_all_value_types() {
                     Value::Array(vec![Value::Int32(1), Value::Int32(2)]),
                 ),
             ])],
-            constraints: vec![],
         },
     )]);
 

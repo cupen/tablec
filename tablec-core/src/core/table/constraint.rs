@@ -621,7 +621,7 @@ impl Constraint {
         }
         let target = by_name[&target_table];
 
-        if !target.fields.iter().any(|f| f.name == target_col) {
+        if !target.schema.fields.iter().any(|f| f.name == target_col) {
             return Err(format!(
                 "@ref: target column '{}' not in table '{}'",
                 target_col, target_table
@@ -679,12 +679,13 @@ impl ConstraintValidator {
         // (missing field, empty string, or `Value::Null`) is reported unless
         // the field has `@nullable` to opt out.
         let nullable_fields: std::collections::HashSet<&str> = table
+            .schema
             .fields
             .iter()
             .filter(|f| f.constraint.as_ref().is_some_and(|c| c.func == "nullable"))
             .map(|f| f.name.as_str())
             .collect();
-        for field in &table.fields {
+        for field in &table.schema.fields {
             if nullable_fields.contains(field.name.as_str()) {
                 continue;
             }
@@ -712,7 +713,7 @@ impl ConstraintValidator {
         }
 
         // Field-level constraints (constraint declared in row 4 column).
-        for field in &table.fields {
+        for field in &table.schema.fields {
             if let Some(constraint) = &field.constraint {
                 // Defer cross-table constraints to validate_project.
                 if constraint.is_cross_table() {
@@ -725,12 +726,12 @@ impl ConstraintValidator {
         }
 
         // Table-level constraints (row 5).
-        for constraint in &table.constraints {
+        for constraint in &table.schema.constraints {
             // Defer cross-table constraints to validate_project.
             if constraint.is_cross_table() {
                 continue;
             }
-            if let Err(msg) = constraint.validate(&table.fields, &table.data) {
+            if let Err(msg) = constraint.validate(&table.schema.fields, &table.data) {
                 errors.push(constraint.to_diagnostic(&msg));
             }
         }
@@ -760,7 +761,7 @@ impl ConstraintValidator {
 
         for t in tables {
             // Field-level @ref / @no_ref: host is the field itself.
-            for field in &t.fields {
+            for field in &t.schema.fields {
                 if let Some(c) = &field.constraint {
                     if c.is_cross_table() {
                         if let Err(msg) =
@@ -772,10 +773,12 @@ impl ConstraintValidator {
                 }
             }
             // Table-level @ref / @no_ref: first arg names the host.
-            for c in &t.constraints {
+            for c in &t.schema.constraints {
                 if c.is_cross_table() {
                     let host = c.args.first().cloned().unwrap_or_default();
-                    if let Err(msg) = c.validate_cross_table(&t.fields, &t.data, &by_name, &host) {
+                    if let Err(msg) =
+                        c.validate_cross_table(&t.schema.fields, &t.data, &by_name, &host)
+                    {
                         errors.push(c.to_diagnostic(&msg));
                     }
                 }
@@ -1300,9 +1303,8 @@ mod tests {
     ) -> Table {
         Table {
             name: name.to_string(),
-            fields,
+            schema: crate::core::schema::Schema::from_parts(fields, constraints),
             data,
-            constraints,
         }
     }
 

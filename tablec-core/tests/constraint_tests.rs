@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use tablec_core::core::schema::Schema;
 use tablec_core::core::table::constraint::Constraint;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
@@ -405,22 +406,25 @@ fn test_order_single_row() {
 fn test_validator_all_pass() {
     let table = Table {
         name: "test".to_string(),
-        fields: vec![
-            Field {
-                name: "id".to_string(),
-                t: FieldType::Int32,
-                desc: "".to_string(),
-                constraint: Some(Constraint::from_str("@unique").unwrap()),
-                tags: vec![],
-            },
-            Field {
-                name: "seq".to_string(),
-                t: FieldType::Int32,
-                desc: "".to_string(),
-                constraint: Some(Constraint::from_str("@seq").unwrap()),
-                tags: vec![],
-            },
-        ],
+        schema: Schema::from_parts(
+            vec![
+                Field {
+                    name: "id".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: Some(Constraint::from_str("@unique").unwrap()),
+                    tags: vec![],
+                },
+                Field {
+                    name: "seq".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: Some(Constraint::from_str("@seq").unwrap()),
+                    tags: vec![],
+                },
+            ],
+            vec![],
+        ),
         data: vec![
             Row::from_vec(vec![
                 ("id".to_string(), Value::Int32(1)),
@@ -431,7 +435,6 @@ fn test_validator_all_pass() {
                 ("seq".to_string(), Value::Int32(2)),
             ]),
         ],
-        constraints: vec![],
     };
     assert!(table.validate_constraints().is_ok());
 }
@@ -440,18 +443,20 @@ fn test_validator_all_pass() {
 fn test_validator_one_fails() {
     let table = Table {
         name: "test".to_string(),
-        fields: vec![Field {
-            name: "id".to_string(),
-            t: FieldType::Int32,
-            desc: "".to_string(),
-            constraint: Some(Constraint::from_str("@unique").unwrap()),
-            tags: vec![],
-        }],
+        schema: Schema::from_parts(
+            vec![Field {
+                name: "id".to_string(),
+                t: FieldType::Int32,
+                desc: "".to_string(),
+                constraint: Some(Constraint::from_str("@unique").unwrap()),
+                tags: vec![],
+            }],
+            vec![],
+        ),
         data: vec![
             Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
             Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
         ],
-        constraints: vec![],
     };
     let result = table.validate_constraints();
     assert!(result.is_err());
@@ -463,12 +468,11 @@ fn test_validator_one_fails() {
 fn test_validator_no_constraints() {
     let table = Table {
         name: "test".to_string(),
-        fields: vec![make_field("name", FieldType::String)],
+        schema: Schema::from_parts(vec![make_field("name", FieldType::String)], vec![]),
         data: vec![Row::from_vec(vec![(
             "name".to_string(),
             Value::String("Alice".to_string()),
         )])],
-        constraints: vec![],
     };
     assert!(table.validate_constraints().is_ok());
 }
@@ -477,19 +481,21 @@ fn test_validator_no_constraints() {
 fn test_validator_unknown_constraint_function() {
     let table = Table {
         name: "test".to_string(),
-        fields: vec![Field {
-            name: "id".to_string(),
-            t: FieldType::Int32,
-            desc: "".to_string(),
-            constraint: Some(Constraint {
-                func: "nonexistent".to_string(),
-                args: vec![],
-                location: Default::default(),
-            }),
-            tags: vec![],
-        }],
+        schema: Schema::from_parts(
+            vec![Field {
+                name: "id".to_string(),
+                t: FieldType::Int32,
+                desc: "".to_string(),
+                constraint: Some(Constraint {
+                    func: "nonexistent".to_string(),
+                    args: vec![],
+                    location: Default::default(),
+                }),
+                tags: vec![],
+            }],
+            vec![],
+        ),
         data: vec![Row::from_vec(vec![("id".to_string(), Value::Int32(1))])],
-        constraints: vec![],
     };
     assert!(table.validate_constraints().is_err());
 }

@@ -30,7 +30,7 @@ impl Format for Json {
             });
 
             if self.include_fields {
-                table_json["fields"] = json!(table.fields);
+                table_json["fields"] = json!(table.schema.fields);
             }
 
             tables_json.push(table_json);
@@ -55,6 +55,7 @@ impl Format for Json {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::schema::Schema;
     use crate::core::table::field::{Field, FieldType};
     use crate::core::table::row::Row;
     use crate::core::table::table::Table;
@@ -89,13 +90,15 @@ mod tests {
         ]);
         let table = Table {
             name: "users".to_string(),
-            fields: vec![
-                mk_field("id", FieldType::Int32),
-                mk_field("name", FieldType::String),
-                mk_field("age", FieldType::Int32),
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    mk_field("id", FieldType::Int32),
+                    mk_field("name", FieldType::String),
+                    mk_field("age", FieldType::Int32),
+                ],
+                vec![],
+            ),
             data: vec![row],
-            constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
@@ -139,13 +142,15 @@ mod tests {
         ]);
         let table = Table {
             name: "users".to_string(),
-            fields: vec![
-                mk_field("id", FieldType::Int32),
-                mk_field("name", FieldType::String),
-                mk_field("age", FieldType::Int32),
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    mk_field("id", FieldType::Int32),
+                    mk_field("name", FieldType::String),
+                    mk_field("age", FieldType::Int32),
+                ],
+                vec![],
+            ),
             data: vec![row],
-            constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
@@ -180,12 +185,14 @@ mod tests {
         let table = Table {
             name: "users".to_string(),
             // No Field for "secret" — it was filtered during read_excel.
-            fields: vec![
-                mk_field("id", FieldType::Int32),
-                mk_field("age", FieldType::Int32),
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    mk_field("id", FieldType::Int32),
+                    mk_field("age", FieldType::Int32),
+                ],
+                vec![],
+            ),
             data: vec![row],
-            constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
@@ -220,13 +227,15 @@ mod tests {
         ]);
         let table = Table {
             name: "users".to_string(),
-            fields: vec![
-                mk_field("id", FieldType::Int32),
-                mk_field("name", FieldType::String),
-                mk_field("age", FieldType::Int32),
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    mk_field("id", FieldType::Int32),
+                    mk_field("name", FieldType::String),
+                    mk_field("age", FieldType::Int32),
+                ],
+                vec![],
+            ),
             data: vec![row],
-            constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 
@@ -275,13 +284,15 @@ mod tests {
         ]);
         let table = Table {
             name: "users".to_string(),
-            fields: vec![
-                mk_field("id", FieldType::Int32),
-                mk_field("name", FieldType::String),
-                mk_field("age", FieldType::Int32),
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    mk_field("id", FieldType::Int32),
+                    mk_field("name", FieldType::String),
+                    mk_field("age", FieldType::Int32),
+                ],
+                vec![],
+            ),
             data: vec![row],
-            constraints: vec![],
         };
         let project = Project::from_tables("test".to_string(), vec![table]);
 

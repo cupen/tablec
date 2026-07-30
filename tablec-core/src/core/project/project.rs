@@ -82,7 +82,7 @@ impl Project {
             hasher.update(sheet_name.as_bytes());
 
             // Schema (canonical = JSON with sorted field names).
-            let fields_canon = serde_json::to_vec(&canonical_fields(&table.fields))
+            let fields_canon = serde_json::to_vec(&canonical_fields(&table.schema.fields))
                 .expect("fields always serializable");
             hasher.update(&fields_canon);
 

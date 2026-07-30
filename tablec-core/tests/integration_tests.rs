@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tablec_core::core::project::meta::{Meta, ToolVersion};
 use tablec_core::core::project::project::Project;
+use tablec_core::core::schema::Schema;
 use tablec_core::core::table::constraint::Constraint;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::row::Row;
@@ -18,29 +19,32 @@ fn build_multi_table_project() -> Project {
             "items".to_string(),
             Table {
                 name: "items".to_string(),
-                fields: vec![
-                    Field {
-                        name: "id".to_string(),
-                        t: FieldType::Int32,
-                        desc: "item id".to_string(),
-                        constraint: Some(Constraint::from_str("@unique").unwrap()),
-                        tags: vec!["pk".to_string()],
-                    },
-                    Field {
-                        name: "name".to_string(),
-                        t: FieldType::String,
-                        desc: "item name".to_string(),
-                        constraint: None,
-                        tags: vec![],
-                    },
-                    Field {
-                        name: "price".to_string(),
-                        t: FieldType::Float32,
-                        desc: "item price".to_string(),
-                        constraint: Some(Constraint::from_str("@order(asc)").unwrap()),
-                        tags: vec![],
-                    },
-                ],
+                schema: Schema::from_parts(
+                    vec![
+                        Field {
+                            name: "id".to_string(),
+                            t: FieldType::Int32,
+                            desc: "item id".to_string(),
+                            constraint: Some(Constraint::from_str("@unique").unwrap()),
+                            tags: vec!["pk".to_string()],
+                        },
+                        Field {
+                            name: "name".to_string(),
+                            t: FieldType::String,
+                            desc: "item name".to_string(),
+                            constraint: None,
+                            tags: vec![],
+                        },
+                        Field {
+                            name: "price".to_string(),
+                            t: FieldType::Float32,
+                            desc: "item price".to_string(),
+                            constraint: Some(Constraint::from_str("@order(asc)").unwrap()),
+                            tags: vec![],
+                        },
+                    ],
+                    vec![],
+                ),
                 data: vec![
                     Row::from_vec(vec![
                         ("id".to_string(), Value::Int32(1001)),
@@ -58,29 +62,31 @@ fn build_multi_table_project() -> Project {
                         ("price".to_string(), Value::Float32(25.0)),
                     ]),
                 ],
-                constraints: vec![],
             },
         ),
         (
             "levels".to_string(),
             Table {
                 name: "levels".to_string(),
-                fields: vec![
-                    Field {
-                        name: "level".to_string(),
-                        t: FieldType::Int32,
-                        desc: "level number".to_string(),
-                        constraint: Some(Constraint::from_str("@seq").unwrap()),
-                        tags: vec![],
-                    },
-                    Field {
-                        name: "exp".to_string(),
-                        t: FieldType::Int32,
-                        desc: "experience required".to_string(),
-                        constraint: None,
-                        tags: vec![],
-                    },
-                ],
+                schema: Schema::from_parts(
+                    vec![
+                        Field {
+                            name: "level".to_string(),
+                            t: FieldType::Int32,
+                            desc: "level number".to_string(),
+                            constraint: Some(Constraint::from_str("@seq").unwrap()),
+                            tags: vec![],
+                        },
+                        Field {
+                            name: "exp".to_string(),
+                            t: FieldType::Int32,
+                            desc: "experience required".to_string(),
+                            constraint: None,
+                            tags: vec![],
+                        },
+                    ],
+                    vec![],
+                ),
                 data: vec![
                     Row::from_vec(vec![
                         ("level".to_string(), Value::Int32(1)),
@@ -95,7 +101,6 @@ fn build_multi_table_project() -> Project {
                         ("exp".to_string(), Value::Int32(500)),
                     ]),
                 ],
-                constraints: vec![],
             },
         ),
     ]);
@@ -191,18 +196,20 @@ fn test_full_pipeline_constraint_violation_caught() {
         "bad_items".to_string(),
         Table {
             name: "bad_items".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                t: FieldType::Int32,
-                desc: "".to_string(),
-                constraint: Some(Constraint::from_str("@unique").unwrap()),
-                tags: vec![],
-            }],
+            schema: Schema::from_parts(
+                vec![Field {
+                    name: "id".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: Some(Constraint::from_str("@unique").unwrap()),
+                    tags: vec![],
+                }],
+                vec![],
+            ),
             data: vec![
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]), // duplicate!
             ],
-            constraints: vec![],
         },
     )]);
 
@@ -227,15 +234,17 @@ fn test_full_pipeline_constraint_violation_caught() {
 fn test_project_from_tables() {
     let tables = vec![Table {
         name: "heroes".to_string(),
-        fields: vec![Field {
-            name: "id".to_string(),
-            t: FieldType::Int32,
-            desc: "".to_string(),
-            constraint: None,
-            tags: vec![],
-        }],
+        schema: Schema::from_parts(
+            vec![Field {
+                name: "id".to_string(),
+                t: FieldType::Int32,
+                desc: "".to_string(),
+                constraint: None,
+                tags: vec![],
+            }],
+            vec![],
+        ),
         data: vec![Row::from_vec(vec![("id".to_string(), Value::Int32(1))])],
-        constraints: vec![],
     }];
 
     let project = Project::from_tables("my_project".to_string(), tables);
@@ -249,15 +258,13 @@ fn test_project_multiple_tables_from_tables() {
     let tables = vec![
         Table {
             name: "t1".to_string(),
-            fields: vec![],
+            schema: Schema::from_parts(vec![], vec![]),
             data: vec![],
-            constraints: vec![],
         },
         Table {
             name: "t2".to_string(),
-            fields: vec![],
+            schema: Schema::from_parts(vec![], vec![]),
             data: vec![],
-            constraints: vec![],
         },
     ];
 
@@ -269,24 +276,26 @@ fn test_project_multiple_tables_from_tables() {
 fn test_table_with_tags() {
     let table = Table {
         name: "heroes".to_string(),
-        fields: vec![
-            Field {
-                name: "id".to_string(),
-                t: FieldType::Int32,
-                desc: "".to_string(),
-                constraint: None,
-                tags: vec!["pk".to_string(), "auto".to_string()],
-            },
-            Field {
-                name: "name".to_string(),
-                t: FieldType::String,
-                desc: "".to_string(),
-                constraint: None,
-                tags: vec![],
-            },
-        ],
+        schema: Schema::from_parts(
+            vec![
+                Field {
+                    name: "id".to_string(),
+                    t: FieldType::Int32,
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec!["pk".to_string(), "auto".to_string()],
+                },
+                Field {
+                    name: "name".to_string(),
+                    t: FieldType::String,
+                    desc: "".to_string(),
+                    constraint: None,
+                    tags: vec![],
+                },
+            ],
+            vec![],
+        ),
         data: vec![],
-        constraints: vec![],
     };
 
     let json = Json {
@@ -442,32 +451,34 @@ fn test_table_with_nested_types_json_roundtrip() {
 
     let table = Table {
         name: "test".to_string(),
-        fields: vec![Field {
-            name: "pos".to_string(),
-            t: FieldType::Struct {
-                fields: vec![
-                    Field {
-                        name: "x".to_string(),
-                        t: FieldType::Int32,
-                        desc: "".to_string(),
-                        constraint: None,
-                        tags: vec![],
-                    },
-                    Field {
-                        name: "y".to_string(),
-                        t: FieldType::Int32,
-                        desc: "".to_string(),
-                        constraint: None,
-                        tags: vec![],
-                    },
-                ],
-            },
-            desc: "".to_string(),
-            constraint: None,
-            tags: vec![],
-        }],
+        schema: Schema::from_parts(
+            vec![Field {
+                name: "pos".to_string(),
+                t: FieldType::Struct {
+                    fields: vec![
+                        Field {
+                            name: "x".to_string(),
+                            t: FieldType::Int32,
+                            desc: "".to_string(),
+                            constraint: None,
+                            tags: vec![],
+                        },
+                        Field {
+                            name: "y".to_string(),
+                            t: FieldType::Int32,
+                            desc: "".to_string(),
+                            constraint: None,
+                            tags: vec![],
+                        },
+                    ],
+                },
+                desc: "".to_string(),
+                constraint: None,
+                tags: vec![],
+            }],
+            vec![],
+        ),
         data: vec![Row::from_vec(vec![("pos".to_string(), Value::Struct(s))])],
-        constraints: vec![],
     };
 
     let json = Json {

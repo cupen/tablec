@@ -6,15 +6,15 @@ use super::field::{self, FieldType};
 use super::row::Row;
 use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
 use crate::core::parser::value_parser::parse_value;
+use crate::core::schema::Schema;
 
 use super::constraint::{self, Constraint, ConstraintValidator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     pub name: String,
-    pub fields: Vec<field::Field>,
+    pub schema: Schema,
     pub data: Vec<Row>,
-    pub constraints: Vec<constraint::Constraint>,
 }
 
 pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
@@ -184,9 +184,8 @@ pub fn read_excel(fpath: &str) -> Result<Vec<Table>, Vec<Diagnostic>> {
 
         tables.push(Table {
             name: sheet_name.to_owned(),
-            fields,
+            schema: Schema::from_parts(fields, table_constraints),
             data,
-            constraints: table_constraints,
         });
     }
 
@@ -222,22 +221,25 @@ mod tests {
         // 创建一个简单的表格用于JSON导出测试
         let table = Table {
             name: "test_table".to_string(),
-            fields: vec![
-                crate::core::table::field::Field {
-                    name: "ID".to_string(),
-                    t: crate::core::table::field::FieldType::Int32,
-                    desc: "ID字段".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                },
-                crate::core::table::field::Field {
-                    name: "Name".to_string(),
-                    t: crate::core::table::field::FieldType::String,
-                    desc: "姓名".to_string(),
-                    constraint: None,
-                    tags: vec![],
-                },
-            ],
+            schema: Schema::from_parts(
+                vec![
+                    crate::core::table::field::Field {
+                        name: "ID".to_string(),
+                        t: crate::core::table::field::FieldType::Int32,
+                        desc: "ID字段".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    },
+                    crate::core::table::field::Field {
+                        name: "Name".to_string(),
+                        t: crate::core::table::field::FieldType::String,
+                        desc: "姓名".to_string(),
+                        constraint: None,
+                        tags: vec![],
+                    },
+                ],
+                vec![],
+            ),
             data: vec![
                 Row::from_vec(vec![
                     ("ID".to_string(), Value::Int32(1)),
@@ -248,7 +250,6 @@ mod tests {
                     ("Name".to_string(), Value::String("Bob".to_string())),
                 ]),
             ],
-            constraints: vec![],
         };
 
         // 测试JSON导出
@@ -278,5 +279,40 @@ mod tests {
     fn out_of_range_cell_yields_clear_error() {
         // Generate an in-memory workbook-like construction? Tests of read_excel
         // require real .xlsx files; defer detailed xlsx tests to error_cases fixtures (c4).
+    }
+}
+
+#[cfg(test)]
+mod refactor_tests {
+    use super::*;
+    use crate::core::schema::Schema;
+
+    #[test]
+    fn table_constructs_with_schema_field() {
+        let t = Table {
+            name: "x".to_string(),
+            schema: Schema::from_parts(vec![], vec![]),
+            data: vec![],
+        };
+        assert_eq!(t.name, "x");
+        assert_eq!(t.schema.fields.len(), 0);
+    }
+
+    #[test]
+    fn table_schema_accessible() {
+        let f = crate::core::table::field::Field {
+            name: "id".to_string(),
+            t: crate::core::table::field::FieldType::Int32,
+            desc: String::new(),
+            constraint: None,
+            tags: vec![],
+        };
+        let t = Table {
+            name: "x".to_string(),
+            schema: Schema::from_parts(vec![f.clone()], vec![]),
+            data: vec![],
+        };
+        assert_eq!(t.schema.fields.len(), 1);
+        assert_eq!(t.schema.fields[0].name, "id");
     }
 }
