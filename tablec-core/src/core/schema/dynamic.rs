@@ -31,7 +31,15 @@ impl fmt::Display for DynamicPluginError {
     }
 }
 
-impl std::error::Error for DynamicPluginError {}
+impl std::error::Error for DynamicPluginError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DynamicPluginError::Load(e) => Some(e),
+            DynamicPluginError::Symbol(e) => Some(e),
+            DynamicPluginError::NullPointer => None,
+        }
+    }
+}
 
 pub struct DynamicPlugin {
     _lib: libloading::Library,
