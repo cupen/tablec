@@ -75,6 +75,11 @@ pub struct BuildCommand {
     /// Include field metadata. Overrides config when given.
     #[arg(long)]
     pub include_fields: Option<bool>,
+
+    /// Schema parser name to use. Overrides `tablec.toml [parser] name` when given.
+    /// Falls back to "standard" if neither is set.
+    #[arg(long)]
+    pub parser: Option<String>,
 }
 
 impl BuildCommand {
@@ -98,10 +103,15 @@ impl BuildCommand {
 
     fn run_single(&self, input: &Path, explicit_cfg: Option<Config>) -> Result<(), Box<dyn Error>> {
         let cfg = explicit_cfg.unwrap_or_default();
-        let format = self.format.clone().unwrap_or(cfg.export.format);
+        let format = self
+            .format
+            .clone()
+            .unwrap_or_else(|| cfg.export.format.clone());
         let include_fields = self
             .include_fields
             .unwrap_or(cfg.export.include_fields.unwrap_or(false));
+
+        let _parser = crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref());
 
         let output = self
             .output
@@ -137,7 +147,10 @@ impl BuildCommand {
             },
         };
 
-        let format = self.format.clone().unwrap_or(cfg.export.format);
+        let format = self
+            .format
+            .clone()
+            .unwrap_or_else(|| cfg.export.format.clone());
         let include_fields = self
             .include_fields
             .unwrap_or(cfg.export.include_fields.unwrap_or(false));
@@ -145,6 +158,8 @@ impl BuildCommand {
         let include = cfg.data.include.clone().unwrap_or_default();
         let exclude = cfg.data.exclude.clone().unwrap_or_default();
         let files = config::find_excel_files(&input_dir.to_string_lossy(), &include, &exclude)?;
+
+        let _parser = crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref());
 
         if files.is_empty() {
             return Err(format!(
@@ -513,6 +528,7 @@ mod tests {
             config: None,
             format: None,
             include_fields: None,
+            parser: None,
         };
         cmd.run().expect("dir mode build should succeed");
 
@@ -559,6 +575,7 @@ output_dir = "."
             config: None,
             format: None,
             include_fields: None,
+            parser: None,
         };
         cmd.run().expect("dir mode build should succeed");
 
@@ -582,6 +599,7 @@ output_dir = "."
             config: None,
             format: None,
             include_fields: None,
+            parser: None,
         };
         let err = cmd.run().expect_err("should fail with no xlsx files");
         assert!(
@@ -602,6 +620,7 @@ output_dir = "."
             config: None,
             format: None,
             include_fields: None,
+            parser: None,
         };
         let err = cmd.run().expect_err("single file without -o should fail");
         assert!(
@@ -623,6 +642,7 @@ output_dir = "."
             config: None,
             format: None,
             include_fields: None,
+            parser: None,
         };
         let err = cmd
             .run()

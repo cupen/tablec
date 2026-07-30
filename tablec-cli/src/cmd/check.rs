@@ -15,6 +15,11 @@ pub struct CheckCommand {
 
     #[arg()] // Positional argument
     pub path: Option<PathBuf>,
+
+    /// Schema parser name to use. Overrides `tablec.toml [parser] name` when given.
+    /// Falls back to "standard" if neither is set.
+    #[arg(long)]
+    pub parser: Option<String>,
 }
 
 impl CheckCommand {
@@ -30,6 +35,10 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
 
     // Try to load config
     let config = Config::load(c.config.as_deref())?;
+
+    // Resolve schema parser (cli > config > "standard").
+    let parser_cfg = config.clone().unwrap_or_default();
+    let _parser = crate::parser_resolve::resolve_parser(&parser_cfg, c.parser.as_deref());
 
     let path = if let Some(p) = c.path {
         // CLI path takes precedence

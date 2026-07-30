@@ -6,6 +6,12 @@ pub struct Config {
     pub project: ProjectConfig,
     pub data: DataConfig,
     pub export: ExportConfig,
+    pub parser: Option<ParserConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParserConfig {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +55,7 @@ impl Default for Config {
                 pretty: Some(true),
                 include_fields: Some(false),
             },
+            parser: None,
         }
     }
 }
@@ -150,4 +157,35 @@ pub fn find_excel_files(
     files.dedup();
 
     Ok(files)
+}
+
+#[cfg(test)]
+mod parser_config_tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_no_parser() {
+        let c = Config::default();
+        assert!(c.parser.is_none());
+    }
+
+    #[test]
+    fn parse_toml_with_parser_section() {
+        let toml_str = r#"
+[project]
+name = "x"
+
+[data]
+input_dir = "data"
+
+[export]
+format = "json"
+output_dir = "out"
+
+[parser]
+name = "my-parser"
+"#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(c.parser.unwrap().name, "my-parser");
+    }
 }
