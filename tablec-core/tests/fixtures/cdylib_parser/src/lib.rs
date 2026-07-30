@@ -26,7 +26,7 @@ impl SchemaParser for FixtureParser {
 /// # Safety
 ///
 /// 进程初始化阶段由 host 调用一次；返回的指针必须用 `tablec_plugin_drop_v1` 释放。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn tablec_plugin_create_v1() -> *mut dyn SchemaParser {
     Box::into_raw(Box::new(FixtureParser))
 }
@@ -36,7 +36,7 @@ pub unsafe extern "C" fn tablec_plugin_create_v1() -> *mut dyn SchemaParser {
 /// # Safety
 ///
 /// 必须且仅能由 `tablec_plugin_create_v1` 返回的指针调用一次。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn tablec_plugin_drop_v1(p: *mut dyn SchemaParser) {
     if !p.is_null() {
         // SAFETY: pointer originated from `Box::into_raw` in `tablec_plugin_create_v1`.
