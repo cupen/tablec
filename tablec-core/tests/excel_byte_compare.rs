@@ -21,10 +21,10 @@ fn list_test_xlsx() -> Vec<PathBuf> {
 #[test]
 fn read_excel_with_standard_matches_read_excel_byte_level() {
     let xs = list_test_xlsx();
-    if xs.is_empty() {
-        eprintln!("no fixture xlsx; skipping");
-        return;
-    }
+    assert!(
+        !xs.is_empty(),
+        "no fixture xlsx found in tests/fixtures/testdata/ — byte-level test would be a no-op"
+    );
     for p in xs {
         let old =
             read_excel(p.to_str().unwrap()).unwrap_or_else(|e| panic!("{}: {:?}", p.display(), e));

@@ -41,6 +41,9 @@ pub fn read_excel_with(
     let mut diagnostics: Vec<Diagnostic> = vec![];
 
     for sheet_name in workbook.sheet_names().to_owned() {
+        if sheet_name.starts_with('#') {
+            continue;
+        }
         let sheet = match workbook.worksheet_range(&sheet_name) {
             Ok(range) => range,
             Err(e) => {
@@ -306,5 +309,85 @@ mod refactor_tests {
         };
         assert_eq!(t.schema.fields.len(), 1);
         assert_eq!(t.schema.fields[0].name, "id");
+    }
+}
+
+#[cfg(test)]
+mod sheet_name_skip_tests {
+    use super::*;
+    use rust_xlsxwriter::Workbook;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Write a minimal xlsx with two valid 5-row schemas: one regular sheet,
+    /// one whose name starts with `#`. Returns the path.
+    fn write_xlsx_with_hash_named_sheet() -> std::path::PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!("tablec_core_sheet_name_skip_{pid}_{n}.xlsx"));
+        let _ = std::fs::remove_file(&path);
+
+        let mut wb = Workbook::new();
+        let keep = wb.add_worksheet();
+        keep.set_name("Items").ok();
+        keep.write_string(0, 0, "id").ok();
+        keep.write_string(0, 1, "name").ok();
+        keep.write_string(1, 0, "int").ok();
+        keep.write_string(1, 1, "string").ok();
+        keep.write_number(5, 0, 1.0).ok();
+        keep.write_string(5, 1, "alice").ok();
+
+        let skipped = wb.add_worksheet();
+        skipped.set_name("#comment").ok();
+        skipped.write_string(0, 0, "id").ok();
+        skipped.write_string(0, 1, "note").ok();
+        skipped.write_string(1, 0, "int").ok();
+        skipped.write_string(1, 1, "string").ok();
+        skipped.write_number(5, 0, 99.0).ok();
+        skipped.write_string(5, 1, "should_be_skipped").ok();
+
+        wb.save(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn read_excel_with_skips_sheets_whose_name_starts_with_hash() {
+        let path = write_xlsx_with_hash_named_sheet();
+        let tables =
+            read_excel_with(path.to_str().unwrap(), &StandardSchemaParser).expect("no diags");
+
+        let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names.contains(&"Items"),
+            "expected Items sheet to be parsed; got: {:?}",
+            names
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with('#')),
+            "sheets starting with `#` must be skipped; got: {:?}",
+            names
+        );
+        assert_eq!(
+            tables.len(),
+            1,
+            "exactly one table expected, got: {:?}",
+            names
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_excel_also_skips_sheets_whose_name_starts_with_hash() {
+        let path = write_xlsx_with_hash_named_sheet();
+        let tables = read_excel(path.to_str().unwrap()).expect("no diags");
+        let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            !names.iter().any(|n| n.starts_with('#')),
+            "read_excel must also skip `#`-named sheets; got: {:?}",
+            names
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
