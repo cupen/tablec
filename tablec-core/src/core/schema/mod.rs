@@ -325,7 +325,12 @@ impl SchemaParser for StandardSchemaParser {
         Ok(SchemaParseResult::Schema(Schema {
             fields,
             constraints: table_constraints,
-            data_start_row: 5,
+            // If the sheet has fewer than 5 rows, treat all rows as header
+            // (i.e. 0 data rows) instead of failing OOB. This preserves the
+            // legacy `read_excel` behavior of producing an empty-data Table
+            // for short/malformed inputs. Custom parsers still go through
+            // the strict OOB check in `read_excel_with`.
+            data_start_row: std::cmp::min(5, sheet.len()),
         }))
     }
 }
