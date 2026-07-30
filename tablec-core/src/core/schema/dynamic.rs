@@ -11,6 +11,7 @@ pub enum DynamicPluginError {
     Load(libloading::Error),
     Symbol(libloading::Error),
     NullPointer,
+    DuplicateName(String),
 }
 
 impl fmt::Display for DynamicPluginError {
@@ -27,6 +28,9 @@ impl fmt::Display for DynamicPluginError {
                 e
             ),
             DynamicPluginError::NullPointer => write!(f, "plugin returned null pointer"),
+            DynamicPluginError::DuplicateName(name) => write!(
+                f, "plugin name '{}' already registered", name
+            ),
         }
     }
 }
@@ -34,9 +38,8 @@ impl fmt::Display for DynamicPluginError {
 impl std::error::Error for DynamicPluginError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            DynamicPluginError::Load(e) => Some(e),
-            DynamicPluginError::Symbol(e) => Some(e),
-            DynamicPluginError::NullPointer => None,
+            DynamicPluginError::Load(e) | DynamicPluginError::Symbol(e) => Some(e),
+            DynamicPluginError::NullPointer | DynamicPluginError::DuplicateName(_) => None,
         }
     }
 }

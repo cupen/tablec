@@ -341,12 +341,24 @@ impl SchemaParserRegistry {
         r
     }
 
+    /// Build a registry with `standard` + plugins loaded from `plugin_paths`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `plugin_paths` points to trusted, ABI-compatible
+    /// tablec plugins. Loading a `.so` runs arbitrary initializer code; this
+    /// API does not validate plugin provenance.
     pub fn with_standard_and_plugins(
         plugin_paths: &[std::path::PathBuf],
     ) -> Result<Self, crate::core::schema::dynamic::DynamicPluginError> {
         let mut reg = Self::with_standard();
         for path in plugin_paths {
+            // SAFETY: caller-provided plugin paths are trusted (see doc above).
             let plugin = unsafe { crate::core::schema::dynamic::DynamicPlugin::load(path) }?;
+            let name = plugin.name().to_string();
+            if reg.parsers.contains_key(&name) {
+                return Err(crate::core::schema::dynamic::DynamicPluginError::DuplicateName(name));
+            }
             reg.register_arc(plugin);
         }
         Ok(reg)
@@ -395,6 +407,14 @@ mod registry_tests {
     fn register_same_name_panics() {
         let mut reg = SchemaParserRegistry::with_standard();
         reg.register(StandardSchemaParser);
+    }
+
+    #[test]
+    #[should_panic(expected = "parser 'standard' already registered")]
+    fn register_arc_panics_on_duplicate_name() {
+        let mut reg = SchemaParserRegistry::with_standard();
+        let arc: std::sync::Arc<dyn SchemaParser> = std::sync::Arc::new(StandardSchemaParser);
+        reg.register_arc(arc);
     }
 }
 
