@@ -140,7 +140,6 @@ mod tests {
     use crate::core::table::field::{Field, FieldType};
     use crate::core::table::row::Row;
     use crate::core::table::value::Value;
-    use std::path::PathBuf;
     use std::str::FromStr;
 
     fn empty_table(name: &str) -> Table {
@@ -183,11 +182,13 @@ mod tests {
 
     #[test]
     fn from_tables_with_source_stamps_meta_and_seeds_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_path = dir.path().join("a.xlsx");
         let tables = vec![empty_table("a")];
-        let source = vec![PathBuf::from("/tmp/a.xlsx")];
+        let source = vec![src_path.clone()];
         let project = Project::from_tables_with_source("p".to_string(), tables, source);
         assert_eq!(project.meta.source.len(), 1);
-        assert_eq!(project.meta.source[0], PathBuf::from("/tmp/a.xlsx"));
+        assert_eq!(project.meta.source[0], src_path);
         // from_tables_with_source calls calculate_hash; hash must not be all-zero.
         assert_ne!(project.meta.hash, [0u8; 32]);
     }
@@ -289,9 +290,34 @@ mod tests {
 
     #[test]
     fn validate_all_collects_constraint_violations() {
+        use crate::core::diagnostic::{DiagnosticCode, Severity};
         use crate::core::table::constraint::Constraint;
-        let table = Table {
+
+        // Fail loudly if the fixture constraint itself is invalid: a silent
+        // `None` here would make the test pass for the wrong reason.
+        let unique = Constraint::from_str("@unique")
+            .expect("'@unique' must parse as a valid constraint fixture");
+        assert_eq!(unique.func, "unique");
+
+        let offending = Table {
             name: "t".to_string(),
+            fields: vec![Field {
+                name: "id".to_string(),
+                t: FieldType::Int32,
+                desc: String::new(),
+                constraint: Some(unique),
+                tags: vec![],
+            }],
+            // Two rows with the same id -> @unique violation on row 2.
+            data: vec![
+                Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+                Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+            ],
+            constraints: vec![],
+        };
+        // A second, clean table: its presence pins the violation to `t` only.
+        let clean = Table {
+            name: "clean".to_string(),
             fields: vec![Field {
                 name: "id".to_string(),
                 t: FieldType::Int32,
@@ -299,18 +325,44 @@ mod tests {
                 constraint: Constraint::from_str("@unique").ok(),
                 tags: vec![],
             }],
-            // Two rows with the same id -> @unique violation.
             data: vec![
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
-                Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
+                Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
             ],
             constraints: vec![],
         };
-        let project = Project::from_tables("p".to_string(), vec![table]);
+
+        let project = Project::from_tables("p".to_string(), vec![offending, clean]);
         let errs = project.validate_all().unwrap_err();
+
+        // Exactly one violation: from `t`, not from `clean`.
+        assert_eq!(
+            errs.len(),
+            1,
+            "expected exactly one violation, got: {:?}",
+            errs
+        );
+        let d = &errs[0];
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(
+            d.code,
+            DiagnosticCode::ConstraintDuplicate,
+            "@unique duplicate must map to ConstraintDuplicate"
+        );
         assert!(
-            !errs.is_empty(),
-            "validate_all must surface per-table constraint violations"
+            d.message.contains("@unique"),
+            "message must name the violated constraint, got: {}",
+            d.message
+        );
+        assert!(
+            d.message.contains("id"),
+            "message must name the violated field, got: {}",
+            d.message
+        );
+        assert!(
+            d.message.contains("row 2"),
+            "message must point at the duplicate row, got: {}",
+            d.message
         );
     }
 
