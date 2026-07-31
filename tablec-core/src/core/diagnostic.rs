@@ -88,6 +88,7 @@ impl std::fmt::Display for Diagnostic {
         if let Some(sheet) = &self.location.sheet {
             write!(f, " [{}]", sheet)?;
         }
+        // TODO: render lone line as " 7" or similar — see display_drops_line_when_column_missing
         if let (Some(line), Some(col)) = (self.location.line, self.location.column) {
             write!(f, " {}:{}", line, col)?;
         }
@@ -277,6 +278,22 @@ mod tests {
         // No "[sheet]" block when sheet is absent.
         assert!(!s.contains('['));
         assert!(!s.contains(']'));
+    }
+
+    #[test]
+    fn display_drops_line_when_column_missing() {
+        let d = Diagnostic::new(
+            DiagnosticCode::Other,
+            "m",
+            SourceLocation {
+                file: None,
+                sheet: None,
+                line: Some(7),
+                column: None,
+            },
+        );
+        // Known wart: Display requires BOTH line and column; a lone line is dropped.
+        assert_eq!(format!("{}", d), "Other: m");
     }
 
     #[test]
