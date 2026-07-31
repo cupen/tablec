@@ -4,22 +4,46 @@ Python bindings for the tablec (Table Compiler) library.
 
 ## Installation
 
-### Development
-
-```bash
-# Install dependencies using uv
-cd binding-python
-uv sync
-
-# Build the Rust extension
-uv run maturin develop
-```
-
-### From wheel (future)
+### From pypi
 
 ```bash
 pip install tablec
 ```
+
+### Development
+
+```bash
+# initialize
+cd binding-python
+uv sync
+
+# debug 
+uv run maturin develop
+```
+
+## Testing
+
+```bash
+# Run all tests
+uv run pytest tests/ -v
+
+# Run specific test file
+uv run pytest tests/test_python_binding.py -v
+```
+
+## Building for Distribution
+
+```bash
+# Build release wheel
+uv run maturin build --release
+
+# Build for multiple Python versions
+uv run maturin build --release --strip --compatibility manylinux
+
+# Publish to pypi
+uv run maturin publish
+```
+
 
 ## Usage
 
@@ -79,11 +103,11 @@ if array_type.is_array():
 
 Excel sheets should follow this format:
 
-| Row 1    | Field names (e.g., id, name, score) |
-| Row 2    | Field types (e.g., int, string, float) |
-| Row 3    | Descriptions (use # for none) |
-| Row 4    | Constraints (e.g., @unique, @seq) |
-| Row 5+   | Data rows |
+| Row 1    | Field names (e.g., id, name, score) |  
+| Row 2    | Field types (e.g., int, string, float) |  
+| Row 3    | Descriptions (use # for none) |  
+| Row 4    | Constraints (e.g., @unique, @seq) |  
+| Row 5+   | Data rows |  
 
 ### Supported Types
 
@@ -101,25 +125,6 @@ Excel sheets should follow this format:
 - `@order` - Ordered ascending
 - `@order(desc)` - Ordered descending
 
-## Testing
-
-```bash
-# Run all tests
-uv run pytest tests/ -v
-
-# Run specific test file
-uv run pytest tests/test_python_binding.py -v
-```
-
-## Building for Distribution
-
-```bash
-# Build release wheel
-uv run maturin build --release
-
-# Build for multiple Python versions
-uv run maturin build --release --strip --compatibility manylinux
-```
 
 ## Error Handling
 
@@ -144,5 +149,5 @@ If you `pip install` a checkout of this repo, the editable install uses the
 project's `name` (`tablec`) — `import tablec` is the canonical import.
 
 ## License
+MIT
 
-Same as the main tablec project.
