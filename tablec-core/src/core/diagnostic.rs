@@ -210,4 +210,192 @@ mod tests {
         );
         assert_eq!(d.code, DiagnosticCode::SchemaDataStartOOB);
     }
+
+    #[test]
+    fn new_defaults_severity_to_error() {
+        let d = Diagnostic::new(
+            DiagnosticCode::ValueParseError,
+            "bad value",
+            SourceLocation::default(),
+        );
+        assert_eq!(d.severity, Severity::Error);
+    }
+
+    #[test]
+    fn from_str_sets_other_code_default_location_and_error_severity() {
+        let d: Diagnostic = "boom".into();
+        assert_eq!(d.code, DiagnosticCode::Other);
+        assert_eq!(d.message, "boom");
+        assert_eq!(d.location, SourceLocation::default());
+        assert_eq!(d.severity, Severity::Error);
+    }
+
+    #[test]
+    fn display_with_sheet_only_skips_line_column_block() {
+        let d = Diagnostic::new(
+            DiagnosticCode::ConstraintUnknown,
+            "unknown constraint",
+            SourceLocation {
+                file: None,
+                sheet: Some("SheetA".into()),
+                line: None,
+                column: None,
+            },
+        );
+        let s = format!("{}", d);
+        assert_eq!(s, "ConstraintUnknown [SheetA]: unknown constraint");
+        // No " <line>:<col>" block when line/column are absent.
+        // (The single ":" before the message is the standard message separator.)
+        assert!(!s.contains("None"));
+        // A line:col block would produce ":<digit>" (digit immediately
+        // after a colon). Confirm no such pattern appears.
+        let has_line_col_block = s
+            .as_bytes()
+            .windows(2)
+            .any(|w| w[0] == b':' && w[1].is_ascii_digit());
+        assert!(
+            !has_line_col_block,
+            "expected no line:col block, got {:?}",
+            s
+        );
+    }
+
+    #[test]
+    fn display_with_line_column_only_skips_sheet_block() {
+        let d = Diagnostic::new(
+            DiagnosticCode::ValueParseError,
+            "parse fail",
+            SourceLocation {
+                file: None,
+                sheet: None,
+                line: Some(7),
+                column: Some(4),
+            },
+        );
+        let s = format!("{}", d);
+        assert_eq!(s, "ValueParseError 7:4: parse fail");
+        // No "[sheet]" block when sheet is absent.
+        assert!(!s.contains('['));
+        assert!(!s.contains(']'));
+    }
+
+    #[test]
+    fn display_omits_file_path_even_when_set() {
+        // Documented behavior contract: `file` is metadata only; it never
+        // appears in the rendered output.
+        let d = Diagnostic::new(
+            DiagnosticCode::Other,
+            "msg",
+            SourceLocation {
+                file: Some(std::path::PathBuf::from("/tmp/whatever.xlsx")),
+                sheet: None,
+                line: None,
+                column: None,
+            },
+        );
+        let s = format!("{}", d);
+        assert_eq!(s, "Other: msg");
+        assert!(!s.contains("/tmp"));
+        assert!(!s.contains(".xlsx"));
+        assert!(!s.contains("whatever"));
+    }
+
+    #[test]
+    fn source_location_default_is_all_none() {
+        let loc = SourceLocation::default();
+        assert!(loc.file.is_none());
+        assert!(loc.sheet.is_none());
+        assert!(loc.line.is_none());
+        assert!(loc.column.is_none());
+    }
+
+    #[test]
+    fn severity_is_copy_and_distinct_variants_compare() {
+        let s = Severity::Error;
+        // Copy: usable after move.
+        let copied = s;
+        let _still_usable = s;
+        assert_eq!(s, copied);
+        assert_ne!(Severity::Error, Severity::Warning);
+        assert_eq!(Severity::Warning, Severity::Warning);
+    }
+
+    #[test]
+    fn severity_serialize_roundtrip() {
+        for sev in [Severity::Error, Severity::Warning] {
+            let json = serde_json::to_string(&sev).unwrap();
+            let back: Severity = serde_json::from_str(&json).unwrap();
+            assert_eq!(sev, back);
+        }
+    }
+
+    #[test]
+    fn source_location_serialize_roundtrip() {
+        let loc = SourceLocation {
+            file: Some(std::path::PathBuf::from("/x/y.xlsx")),
+            sheet: Some("S".into()),
+            line: Some(12),
+            column: Some(5),
+        };
+        let json = serde_json::to_string(&loc).unwrap();
+        let back: SourceLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(loc, back);
+        assert_eq!(
+            back.file.as_deref(),
+            Some(std::path::Path::new("/x/y.xlsx"))
+        );
+        assert_eq!(back.sheet.as_deref(), Some("S"));
+        assert_eq!(back.line, Some(12));
+        assert_eq!(back.column, Some(5));
+    }
+
+    #[test]
+    fn diagnostic_code_serialize_roundtrip() {
+        // Cover both ends of the enum + a mid-range variant.
+        for code in [
+            DiagnosticCode::TokenizerUnexpectedChar,
+            DiagnosticCode::ConstraintForeignKeyViolation,
+            DiagnosticCode::Other,
+        ] {
+            let json = serde_json::to_string(&code).unwrap();
+            let back: DiagnosticCode = serde_json::from_str(&json).unwrap();
+            assert_eq!(code, back);
+        }
+    }
+
+    #[test]
+    fn diagnostic_implements_std_error_trait() {
+        // Usable as &dyn std::error::Error.
+        let d: Diagnostic = "via error trait".into();
+        let err: &dyn std::error::Error = &d;
+        // source() is the default Error::source (None for our impl).
+        assert!(err.source().is_none());
+        // Display via Error matches our Display impl.
+        assert_eq!(err.to_string(), format!("{}", d));
+    }
+
+    #[test]
+    fn new_accepts_any_into_string() {
+        // `&str`
+        let d1 = Diagnostic::new(
+            DiagnosticCode::Other,
+            "from &str",
+            SourceLocation::default(),
+        );
+        // `String`
+        let d2 = Diagnostic::new(
+            DiagnosticCode::Other,
+            String::from("from String"),
+            SourceLocation::default(),
+        );
+        // `Cow<'_, str>` (also implements Into<String>)
+        let d3 = Diagnostic::new(
+            DiagnosticCode::Other,
+            std::borrow::Cow::Borrowed("from Cow"),
+            SourceLocation::default(),
+        );
+        assert_eq!(d1.message, "from &str");
+        assert_eq!(d2.message, "from String");
+        assert_eq!(d3.message, "from Cow");
+    }
 }
