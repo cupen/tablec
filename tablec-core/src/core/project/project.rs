@@ -137,6 +137,7 @@ fn canonical_fields(fields: &[Field]) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::schema::Schema;
     use crate::core::table::field::{Field, FieldType};
     use crate::core::table::row::Row;
     use crate::core::table::value::Value;
@@ -145,9 +146,8 @@ mod tests {
     fn empty_table(name: &str) -> Table {
         Table {
             name: name.to_string(),
-            fields: vec![],
+            schema: Schema::from_parts(vec![], vec![]),
             data: vec![],
-            constraints: vec![],
         }
     }
 
@@ -198,18 +198,20 @@ mod tests {
         let mk = || {
             let table = Table {
                 name: "t".to_string(),
-                fields: vec![Field {
-                    name: "id".to_string(),
-                    t: FieldType::Int32,
-                    desc: String::new(),
-                    constraint: None,
-                    tags: vec![],
-                }],
+                schema: Schema::from_parts(
+                    vec![Field {
+                        name: "id".to_string(),
+                        t: FieldType::Int32,
+                        desc: String::new(),
+                        constraint: None,
+                        tags: vec![],
+                    }],
+                    vec![],
+                ),
                 data: vec![
                     Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
                     Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
                 ],
-                constraints: vec![],
             };
             let mut p = Project::from_tables("p".to_string(), vec![table]);
             p.calculate_hash();
@@ -223,18 +225,20 @@ mod tests {
         let mk = |id_value: i32| {
             let table = Table {
                 name: "t".to_string(),
-                fields: vec![Field {
-                    name: "id".to_string(),
-                    t: FieldType::Int32,
-                    desc: String::new(),
-                    constraint: None,
-                    tags: vec![],
-                }],
+                schema: Schema::from_parts(
+                    vec![Field {
+                        name: "id".to_string(),
+                        t: FieldType::Int32,
+                        desc: String::new(),
+                        constraint: None,
+                        tags: vec![],
+                    }],
+                    vec![],
+                ),
                 data: vec![Row::from_vec(vec![(
                     "id".to_string(),
                     Value::Int32(id_value),
                 )])],
-                constraints: vec![],
             };
             let mut p = Project::from_tables("p".to_string(), vec![table]);
             p.calculate_hash();
@@ -248,12 +252,11 @@ mod tests {
         let mk = |fields: Vec<Field>| {
             let table = Table {
                 name: "t".to_string(),
-                fields,
+                schema: Schema::from_parts(fields, vec![]),
                 data: vec![Row::from_vec(vec![
                     ("a".to_string(), Value::Int32(1)),
                     ("b".to_string(), Value::Int32(2)),
                 ])],
-                constraints: vec![],
             };
             let mut p = Project::from_tables("p".to_string(), vec![table]);
             p.calculate_hash();
@@ -301,35 +304,39 @@ mod tests {
 
         let offending = Table {
             name: "t".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                t: FieldType::Int32,
-                desc: String::new(),
-                constraint: Some(unique),
-                tags: vec![],
-            }],
+            schema: Schema::from_parts(
+                vec![Field {
+                    name: "id".to_string(),
+                    t: FieldType::Int32,
+                    desc: String::new(),
+                    constraint: Some(unique),
+                    tags: vec![],
+                }],
+                vec![],
+            ),
             // Two rows with the same id -> @unique violation on row 2.
             data: vec![
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
             ],
-            constraints: vec![],
         };
         // A second, clean table: its presence pins the violation to `t` only.
         let clean = Table {
             name: "clean".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                t: FieldType::Int32,
-                desc: String::new(),
-                constraint: Constraint::from_str("@unique").ok(),
-                tags: vec![],
-            }],
+            schema: Schema::from_parts(
+                vec![Field {
+                    name: "id".to_string(),
+                    t: FieldType::Int32,
+                    desc: String::new(),
+                    constraint: Constraint::from_str("@unique").ok(),
+                    tags: vec![],
+                }],
+                vec![],
+            ),
             data: vec![
                 Row::from_vec(vec![("id".to_string(), Value::Int32(1))]),
                 Row::from_vec(vec![("id".to_string(), Value::Int32(2))]),
             ],
-            constraints: vec![],
         };
 
         let project = Project::from_tables("p".to_string(), vec![offending, clean]);
