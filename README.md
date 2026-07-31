@@ -1,34 +1,41 @@
 # Tablec
 
+[English](README.md) | [简体中文](docs/README.zh.md)
+
 A **Table Compiler** for game development - compiles Excel/CSV/JSON table data into program-readable formats (JSON, MessagePack).
 
 ## Features
 
-- **Table Schema**: MySQL-like schema with field types and constraints
+- **Table Schema**: Database-Like schema with field types and constraints
 - **Blazing Fast**: Optimized Rust implementation
-- **Rich Type System**: Support for basic types, arrays, maps, and structs
+- **Rich Type System**: Support for basic types, array, map, and struct(aka custom type)
 - **Multiple Export Formats**: JSON, MessagePack
 - **CLI Tool**: Build, check, example commands
 - **Python Bindings**: Native Python API via PyO3
 
 ## Installation
 
-
-Requires Rust 1.60+:
+Requires Rust 1.80+:
 
 ```bash
 cargo install --path .
+tablec --version
 ```
 
 ## Quick Start
 
-### Build Excel to JSON
+### Build
 
 ```bash
 tablec build -i input.xlsx -o output.json
+
+# build ./tablec.toml or all *.xlsx in cwd
+tablec build
+# same, against ./data
+tablec build ./data
 ```
 
-### Check Excel for Errors
+### Check for Errors
 
 ```bash
 tablec check path/to/files
@@ -40,24 +47,10 @@ tablec check path/to/files
 tablec example -o example.xlsx -r 10
 ```
 
-### Build a directory
-
-By default `tablec build` reads the current directory:
-
-```bash
-tablec build                       # build ./tablec.toml or all *.xlsx in cwd
-tablec build ./data                # same, against ./data
-```
-
 If the input directory contains `tablec.toml` (or `.tablec.toml`), it controls
 include patterns, output name, format, and so on. `--config path/to/other.toml`
 overrides auto-discovery.
 
-### Build a single file
-
-```bash
-tablec build -i data/foo.xlsx -o out/foo.json
-```
 
 ## Data Format
 
@@ -164,21 +157,9 @@ cargo bench --package tablec-core
 
 ## Python Bindings
 
-```bash
-cd binding-python
-pip install maturin
-maturin develop
-
-python -c "import tablec; tablec.check('file.xlsx')"
-```
-
-`build(input, output, format)` accepts `json` (minified), `json-pretty` (indented), or `msgpack`. The `json` default matches the CLI's minified output.
+See [README](binding-python/README.md)
 
 ## Development
-
-### Auto-format on commit
-
-This repo ships a git pre-commit hook that runs `cargo fmt --all` and stages the result before each commit (mirrors Go's `gofmt` workflow — format drift never reaches CI). Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -207,4 +188,24 @@ tablec/
 
 ## License
 
-[Your License]
+```
+Copyright (c) 2023-2026 cupen<xcupen@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
