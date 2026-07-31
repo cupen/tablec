@@ -132,4 +132,107 @@ mod tests {
         let r = p.parse_schema("T", &sheet);
         assert!(r.is_err());
     }
+
+    #[test]
+    fn parses_field_metadata_and_table_constraints() {
+        let sheet = sheet_with_rows(&[
+            &["ignored"],
+            &["ignored"],
+            &["Users"],
+            &["id[client,key]", "name"],
+            &["int32", "string"],
+            &["Identifier", "Display name"],
+            &["@range(1, 10)", "@maxlen(20)"],
+            &["@unique(id, name)", ""],
+        ]);
+
+        let schema = match EightRowHeaderParser.parse_schema("Users", &sheet).unwrap() {
+            SchemaParseResult::Schema(schema) => schema,
+            SchemaParseResult::Skip => panic!("expected Schema"),
+        };
+
+        assert_eq!(schema.fields.len(), 2);
+        assert_eq!(schema.fields[0].name, "id");
+        assert_eq!(schema.fields[0].tags, vec!["client", "key"]);
+        assert_eq!(schema.fields[0].desc, "Identifier");
+        let id_constraint = schema.fields[0].constraint.as_ref().unwrap();
+        assert_eq!(id_constraint.func, "range");
+        assert_eq!(id_constraint.args, vec!["1", "10"]);
+
+        assert_eq!(schema.fields[1].name, "name");
+        assert_eq!(schema.fields[1].desc, "Display name");
+        let name_constraint = schema.fields[1].constraint.as_ref().unwrap();
+        assert_eq!(name_constraint.func, "maxlen");
+        assert_eq!(name_constraint.args, vec!["20"]);
+
+        assert_eq!(schema.constraints.len(), 1);
+        assert_eq!(schema.constraints[0].func, "unique");
+        assert_eq!(schema.constraints[0].args, vec!["id", "name"]);
+    }
+
+    #[test]
+    fn exactly_eight_header_rows_parse_without_data_rows() {
+        let sheet = sheet_with_rows(&[
+            &[""],
+            &[""],
+            &[""],
+            &["id"],
+            &["int32"],
+            &["Identifier"],
+            &[""],
+            &[""],
+        ]);
+
+        let schema = match EightRowHeaderParser.parse_schema("T", &sheet).unwrap() {
+            SchemaParseResult::Schema(schema) => schema,
+            SchemaParseResult::Skip => panic!("expected Schema"),
+        };
+
+        assert_eq!(schema.fields.len(), 1);
+        assert_eq!(schema.fields[0].name, "id");
+        assert_eq!(schema.data_start_row, sheet.len());
+    }
+
+    #[test]
+    fn hash_prefixed_field_row_returns_skip() {
+        let sheet = sheet_with_rows(&[
+            &[""],
+            &[""],
+            &[""],
+            &["#comment"],
+            &["int32"],
+            &[""],
+            &[""],
+            &[""],
+        ]);
+
+        let result = EightRowHeaderParser.parse_schema("T", &sheet).unwrap();
+        assert!(matches!(result, SchemaParseResult::Skip));
+    }
+
+    #[test]
+    fn invalid_table_constraint_returns_parse_error() {
+        let sheet = sheet_with_rows(&[
+            &[""],
+            &[""],
+            &[""],
+            &["id"],
+            &["int32"],
+            &[""],
+            &[""],
+            &["unique(id)"],
+        ]);
+
+        let diagnostics = EightRowHeaderParser
+            .parse_schema("T", &sheet)
+            .err()
+            .expect("invalid table constraint should fail");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            crate::core::diagnostic::DiagnosticCode::TableConstraintParseError
+        );
+        assert!(diagnostics[0].message.contains("must start with @"));
+    }
 }
