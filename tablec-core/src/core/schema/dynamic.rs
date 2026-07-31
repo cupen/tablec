@@ -126,4 +126,161 @@ mod tests {
         let r = unsafe { DynamicPlugin::load(Path::new("/tmp/tablec_no_such_plugin_xyz.so")) };
         assert!(matches!(r, Err(DynamicPluginError::Load(_))));
     }
+
+    #[test]
+    fn display_load_error_mentions_shared_object_and_version_note() {
+        // Load wraps a libloading::Error; the Display impl adds a hint
+        // about matching host / plugin Rust toolchain. We can't easily
+        // construct a libloading::Error by hand, but the failing-load
+        // path above proves the inner error flows through — here we just
+        // assert the *added* hint is present in the rendered message.
+        let result = unsafe { DynamicPlugin::load(Path::new("/tmp/tablec_no_such_plugin_xyz.so")) };
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err for missing .so"),
+        };
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains(".so"),
+            "expected .so hint in Display, got: {msg}"
+        );
+        assert!(
+            msg.contains("Rust"),
+            "expected Rust toolchain hint in Display, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn display_symbol_error_mentions_expected_symbol_names() {
+        // Construct the Symbol variant directly with a placeholder inner
+        // error. We don't need the inner error to be a real libloading
+        // error — Display only formats the variant's own hint, not the
+        // inner error's contents.
+        let err = DynamicPluginError::Symbol(libloading::Error::DlSymUnknown);
+        let msg = format!("{}", err);
+        // Both ABI symbol suffixes must be mentioned so the user knows
+        // what to export. The current Display text uses the full
+        // `tablec_plugin_create_v1` prefix and a shortened `drop_v1`
+        // — assert both names appear somewhere in the message.
+        assert!(
+            msg.contains("create_v1"),
+            "expected create_v1 symbol name in Display, got: {msg}"
+        );
+        assert!(
+            msg.contains("drop_v1"),
+            "expected drop_v1 symbol name in Display, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn display_null_pointer_error_is_descriptive() {
+        let err = DynamicPluginError::NullPointer;
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("null"),
+            "expected 'null' in Display, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn display_duplicate_name_includes_the_name() {
+        let err = DynamicPluginError::DuplicateName("widget_v3".to_string());
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("widget_v3"),
+            "expected plugin name in Display, got: {msg}"
+        );
+        assert!(
+            msg.contains("registered"),
+            "expected 'registered' in Display, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn all_four_variants_render_distinct_messages() {
+        // Guard against accidentally collapsing two variants into the
+        // same Display string (would defeat log triage).
+        let load_result =
+            unsafe { DynamicPlugin::load(Path::new("/tmp/tablec_no_such_plugin_xyz.so")) };
+        let load_err = match load_result {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err for missing .so"),
+        };
+        let load = format!("{}", load_err);
+        let symbol = format!(
+            "{}",
+            DynamicPluginError::Symbol(libloading::Error::DlSymUnknown)
+        );
+        let null = format!("{}", DynamicPluginError::NullPointer);
+        let dup = format!("{}", DynamicPluginError::DuplicateName("x".to_string()));
+        let all = [&load, &symbol, &null, &dup];
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "variant {i} and {j} rendered the same message");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_for_load_returns_some_underlying_error() {
+        // Failed load path returns a Load variant whose `source()` must
+        // surface the inner libloading::Error (not None) so callers can
+        // walk the chain.
+        let result = unsafe { DynamicPlugin::load(Path::new("/tmp/tablec_no_such_plugin_xyz.so")) };
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err for missing .so"),
+        };
+        use std::error::Error as _;
+        assert!(
+            err.source().is_some(),
+            "Load variant must expose an inner error via source()"
+        );
+    }
+
+    #[test]
+    fn source_for_symbol_returns_some_underlying_error() {
+        let err = DynamicPluginError::Symbol(libloading::Error::DlSymUnknown);
+        use std::error::Error as _;
+        assert!(
+            err.source().is_some(),
+            "Symbol variant must expose an inner error via source()"
+        );
+    }
+
+    #[test]
+    fn source_for_null_pointer_is_none() {
+        let err = DynamicPluginError::NullPointer;
+        use std::error::Error as _;
+        assert!(
+            err.source().is_none(),
+            "NullPointer variant has no inner error; source() must be None"
+        );
+    }
+
+    #[test]
+    fn source_for_duplicate_name_is_none() {
+        let err = DynamicPluginError::DuplicateName("widget_v3".to_string());
+        use std::error::Error as _;
+        assert!(
+            err.source().is_none(),
+            "DuplicateName variant has no inner error; source() must be None"
+        );
+    }
+
+    // Compile-time assertions that `DynamicPlugin` is `Send + Sync` —
+    // documented as required for `Arc<DynamicPlugin>` to be shared across
+    // threads. If either bound is removed, this test stops compiling.
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    #[test]
+    fn dynamic_plugin_is_send_and_sync() {
+        assert_send::<DynamicPlugin>();
+        assert_sync::<DynamicPlugin>();
+        assert_send::<Arc<DynamicPlugin>>();
+        assert_sync::<Arc<DynamicPlugin>>();
+    }
 }
