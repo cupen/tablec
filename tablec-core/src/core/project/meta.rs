@@ -243,4 +243,111 @@ mod tests {
             json
         );
     }
+
+    // Brief Task 2: `Meta` has no `parse(...)` method — deserialization goes
+    // through the `serde::Deserialize` impl, so "parse" tests below use
+    // `serde_json::from_str` directly.
+
+    const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    #[test]
+    fn parse_minimal_with_required_fields_returns_ok() {
+        // version, hash, build_at are required; source/tool default.
+        let json = format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1}}"#);
+        let meta: Meta = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta.version, "1.0.0");
+        assert_eq!(meta.hash, [0u8; 32]);
+        assert_eq!(meta.build_at, 1);
+        assert!(meta.source.is_empty(), "source defaults to empty Vec");
+        // tool defaults applied.
+        assert_eq!(meta.tool.calamine, "0.25.0");
+    }
+
+    #[test]
+    fn parse_missing_version_returns_err() {
+        let json = format!(r#"{{"hash":"{ZERO_HASH}","build_at":1}}"#);
+        let err = serde_json::from_str::<Meta>(&json).unwrap_err().to_string();
+        assert!(
+            err.contains("version"),
+            "error must point at missing 'version', got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_missing_hash_returns_err() {
+        let json = r#"{"version":"1.0.0","build_at":1}"#;
+        let err = serde_json::from_str::<Meta>(json).unwrap_err().to_string();
+        assert!(
+            err.contains("hash"),
+            "error must point at missing 'hash', got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_missing_build_at_returns_err() {
+        let json = format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}"}}"#);
+        let err = serde_json::from_str::<Meta>(&json).unwrap_err().to_string();
+        assert!(
+            err.contains("build_at"),
+            "error must point at missing 'build_at', got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_invalid_json_returns_err() {
+        let json = "{ this is: not: valid json";
+        assert!(
+            serde_json::from_str::<Meta>(json).is_err(),
+            "malformed input must fail to deserialize"
+        );
+    }
+
+    #[test]
+    fn parse_hash_wrong_length_returns_err() {
+        // 63 chars instead of 64 -> fail length check.
+        let short = "0".repeat(63);
+        let json = format!(r#"{{"version":"1.0.0","hash":"{short}","build_at":1}}"#);
+        let err = serde_json::from_str::<Meta>(&json).unwrap_err().to_string();
+        assert!(
+            err.contains("64"),
+            "error must mention the required 64-char length, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_hash_invalid_hex_chars_returns_err() {
+        // 64 chars but 'z' is not a valid hex digit.
+        let bad = "z".repeat(64);
+        let json = format!(r#"{{"version":"1.0.0","hash":"{bad}","build_at":1}}"#);
+        assert!(
+            serde_json::from_str::<Meta>(&json).is_err(),
+            "non-hex hash chars must fail to deserialize"
+        );
+    }
+
+    #[test]
+    fn full_roundtrip_preserves_all_fields() {
+        let mut meta = Meta::default();
+        meta.hash = [0xab; 32];
+        meta.build_at = 1_700_000_000;
+        meta.source = vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b")];
+        let json = serde_json::to_string(&meta).unwrap();
+        let meta2: Meta = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta.version, meta2.version);
+        assert_eq!(meta.hash, meta2.hash);
+        assert_eq!(meta.build_at, meta2.build_at);
+        assert_eq!(meta.source, meta2.source);
+        assert_eq!(meta.tool.tablec, meta2.tool.tablec);
+        assert_eq!(meta.tool.calamine, meta2.tool.calamine);
+        assert_eq!(meta.tool.serde_json, meta2.tool.serde_json);
+        assert_eq!(meta.tool.blake3, meta2.tool.blake3);
+    }
+
+    #[test]
+    fn parse_extra_unknown_fields_are_ignored() {
+        let json =
+            format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1,"future_field":42}}"#);
+        let meta: Meta = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta.version, "1.0.0");
+    }
 }

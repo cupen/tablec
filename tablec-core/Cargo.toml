@@ -21,6 +21,7 @@ libloading = "0.8"
 pretty_assertions = "1"
 criterion = "0.5"
 rust_xlsxwriter = "0.90"
+tempfile = "3"
 
 [[bench]]
 name = "basic_bench"
