@@ -248,15 +248,12 @@ mod tests {
     // through the `serde::Deserialize` impl, so "parse" tests below use
     // `serde_json::from_str` directly.
 
-    const ZERO_HASH: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
+    const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
     #[test]
     fn parse_minimal_with_required_fields_returns_ok() {
         // version, hash, build_at are required; source/tool default.
-        let json = format!(
-            r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1}}"#
-        );
+        let json = format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1}}"#);
         let meta: Meta = serde_json::from_str(&json).unwrap();
         assert_eq!(meta.version, "1.0.0");
         assert_eq!(meta.hash, [0u8; 32]);
@@ -288,9 +285,7 @@ mod tests {
 
     #[test]
     fn parse_missing_build_at_returns_err() {
-        let json = format!(
-            r#"{{"version":"1.0.0","hash":"{ZERO_HASH}"}}"#
-        );
+        let json = format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}"}}"#);
         let err = serde_json::from_str::<Meta>(&json).unwrap_err().to_string();
         assert!(
             err.contains("build_at"),
@@ -311,9 +306,7 @@ mod tests {
     fn parse_hash_wrong_length_returns_err() {
         // 63 chars instead of 64 -> fail length check.
         let short = "0".repeat(63);
-        let json = format!(
-            r#"{{"version":"1.0.0","hash":"{short}","build_at":1}}"#
-        );
+        let json = format!(r#"{{"version":"1.0.0","hash":"{short}","build_at":1}}"#);
         let err = serde_json::from_str::<Meta>(&json).unwrap_err().to_string();
         assert!(
             err.contains("64"),
@@ -325,9 +318,7 @@ mod tests {
     fn parse_hash_invalid_hex_chars_returns_err() {
         // 64 chars but 'z' is not a valid hex digit.
         let bad = "z".repeat(64);
-        let json = format!(
-            r#"{{"version":"1.0.0","hash":"{bad}","build_at":1}}"#
-        );
+        let json = format!(r#"{{"version":"1.0.0","hash":"{bad}","build_at":1}}"#);
         assert!(
             serde_json::from_str::<Meta>(&json).is_err(),
             "non-hex hash chars must fail to deserialize"
@@ -354,9 +345,8 @@ mod tests {
 
     #[test]
     fn parse_extra_unknown_fields_are_ignored() {
-        let json = format!(
-            r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1,"future_field":42}}"#
-        );
+        let json =
+            format!(r#"{{"version":"1.0.0","hash":"{ZERO_HASH}","build_at":1,"future_field":42}}"#);
         let meta: Meta = serde_json::from_str(&json).unwrap();
         assert_eq!(meta.version, "1.0.0");
     }
