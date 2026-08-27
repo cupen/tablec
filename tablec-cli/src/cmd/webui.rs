@@ -17,8 +17,8 @@ pub struct WebuiCommand {
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
-    /// TCP port. `0` lets the OS pick a free port.
-    #[arg(long, short = 'p', default_value_t = 0)]
+    /// TCP port. Default `9527`.
+    #[arg(long, short = 'p', default_value_t = 9527)]
     pub port: u16,
 
     /// Skip the auto-open browser step (useful for CI / remote boxes).
@@ -131,7 +131,7 @@ mod tests {
             crate::cli::Command::Webui(w) => {
                 assert!(w.dir.is_none());
                 assert_eq!(w.host, "127.0.0.1");
-                assert_eq!(w.port, 0);
+                assert_eq!(w.port, 9527);
                 assert!(!w.no_browser);
                 assert!(w.config.is_none());
                 assert!(w.parser.is_none());

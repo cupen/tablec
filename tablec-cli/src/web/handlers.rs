@@ -830,4 +830,486 @@ mod tests {
         assert!(v["duration_ms"].is_number());
         assert!(v["sheets_checked"].is_number());
     }
+
+    // -------------------------------------------------------------------------
+    // Static asset content types
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn static_app_js_returns_javascript_content_type() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/static/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            ct.starts_with("application/javascript"),
+            "got content-type {ct}"
+        );
+    }
+
+    #[tokio::test]
+    async fn static_style_css_returns_css_content_type() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/static/style.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(ct.starts_with("text/css"), "got content-type {ct}");
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/state
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn state_returns_expected_fields() {
+        let dir = std::path::PathBuf::from("/tmp/webui_smoke_state_test");
+        std::fs::create_dir_all(&dir).ok();
+        let app = crate::web::router(make_state(dir.clone()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["dir"].as_str(), Some(dir.display().to_string().as_str()));
+        assert!(v["parser_names"].is_array());
+        assert!(v["parser_names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n.as_str() == Some("standard")));
+        assert_eq!(v["active_parser"].as_str(), Some("standard"));
+        assert!(v["config_present"].is_boolean());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/files error paths
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn files_404_when_dir_missing() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let url = "/api/files?dir=%2Fno%2Fsuch%2Fdir%2Fsomewhere%2Fzzz";
+        let resp = app
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn files_falls_back_to_state_dir_when_query_missing() {
+        // When ?dir= is omitted, /api/files uses state.dir. Build state
+        // pointing at the fixture dir; the response must include the xlsx.
+        let dir = fixture_dir();
+        if !dir.is_dir() {
+            eprintln!("skipping: fixture dir {} not present", dir.display());
+            return;
+        }
+        let app = crate::web::router(make_state(dir.clone()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        assert!(!entries.is_empty(), "expected ≥1 file under {}", dir.display());
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/sheets & /api/preview error paths
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn sheets_404_when_path_missing() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let url = "/api/sheets?path=%2Fno%2Fsuch%2Ffile.xlsx";
+        let resp = app
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn preview_404_when_path_missing() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let url = "/api/preview?path=%2Fno%2Fsuch.xlsx&sheet=Items";
+        let resp = app
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn preview_404_when_sheet_missing() {
+        let p = fixture_xlsx();
+        if !p.exists() {
+            eprintln!("skipping: fixture {} not present", p.display());
+            return;
+        }
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let url = format!(
+            "/api/preview?path={}&sheet=does-not-exist",
+            urlencoding::encode(&p.display().to_string()),
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(v["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does-not-exist"));
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/build — happy + error paths
+    // -------------------------------------------------------------------------
+
+    fn tmp_with_xlsx() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::copy(fixture_xlsx(), data.join("basic_table.xlsx")).unwrap();
+        (tmp, data)
+    }
+
+    #[tokio::test]
+    async fn build_returns_json_for_valid_request() {
+        let (tmp, _data) = tmp_with_xlsx();
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            r#"
+[project]
+name = "smoke"
+
+[data]
+input_dir = "data"
+include = ["*.xlsx"]
+
+[export]
+format = "json"
+output_dir = "out"
+"#,
+        )
+        .unwrap();
+        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let body = serde_json::json!({
+            "dir": tmp.path().display().to_string(),
+            "format": "json-pretty",
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["format"], "json-pretty");
+        assert!(v["bytes"].as_u64().unwrap() > 0);
+        assert_eq!(v["written"], false);
+        assert!(v["preview_first_500"].as_str().unwrap().contains("smoke"));
+        assert!(v["diagnostics"].is_array());
+        assert!(v["diagnostics"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_writes_to_disk_when_write_true() {
+        let (tmp, _data) = tmp_with_xlsx();
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            r#"
+[project]
+name = "out"
+
+[data]
+input_dir = "data"
+include = ["*.xlsx"]
+
+[export]
+format = "json"
+output_dir = "out"
+"#,
+        )
+        .unwrap();
+        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let body = serde_json::json!({
+            "dir": tmp.path().display().to_string(),
+            "format": "json",
+            "write": true,
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["written"], true);
+        let on_disk = tmp.path().join("out").join("out.json");
+        assert!(
+            on_disk.exists(),
+            "expected {} to exist",
+            on_disk.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn build_rejects_unknown_format() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({
+            "dir": ".",
+            "format": "protobuf",
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "bad_request");
+    }
+
+    #[tokio::test]
+    async fn build_rejects_plugin_paths_from_http() {
+        // plugin_paths from HTTP must be rejected with 400 — only the CLI
+        // flag is trusted. This is the security boundary for cdylib loading.
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({
+            "dir": ".",
+            "format": "json",
+            "plugin_paths": ["/tmp/evil.so"],
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "bad_request");
+        assert!(v["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("plugin_paths"));
+    }
+
+    #[tokio::test]
+    async fn build_rejects_missing_dir() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({
+            "dir": "/no/such/dir/zzz",
+            "format": "json",
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/check error paths
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn check_404_when_dir_missing() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({ "dir": "/no/such/dir/zzz" }).to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn check_rejects_plugin_paths_from_http() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({
+            "dir": ".",
+            "plugin_paths": ["/tmp/evil.so"],
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn check_runs_against_real_dir_and_returns_shape() {
+        let (tmp, _data) = tmp_with_xlsx();
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            r#"
+[project]
+name = "smoke"
+
+[data]
+input_dir = "data"
+include = ["*.xlsx"]
+
+[export]
+format = "json"
+output_dir = "out"
+"#,
+        )
+        .unwrap();
+        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(v["diagnostics"].is_array());
+        assert!(v["sheets_checked"].as_u64().unwrap() >= 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/validate body shape
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_501_body_has_todo_field() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/validate")
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "not_implemented");
+        assert!(v["todo"].is_string());
+        assert!(v["message"].is_string());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unknown routes return 404
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn unknown_route_returns_404() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/does-not-exist")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
