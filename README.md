@@ -159,6 +159,37 @@ cargo bench --package tablec-core
 
 See [README](binding-python/README.md)
 
+## WebUI
+
+For an interactive browser-based UI (preview Excel files, trigger builds,
+inspect diagnostics), launch the built-in webui:
+
+```bash
+cargo run -- webui --dir ./data
+# or, against a built binary:
+./target/debug/tablec webui --dir ./data
+```
+
+The server binds to `127.0.0.1` on an OS-assigned port and auto-opens the
+browser to the entry URL. Use `--no-browser` to skip the auto-open
+(useful for CI / remote hosts) and `--port <N>` to pin the port.
+
+Features exposed:
+
+- Browse the configured data directory and preview every sheet in every
+  `.xlsx` / `.xls` / `.xlsb` / `.ods` file (first 5 schema rows + first 100
+  data rows)
+- Trigger a build with the chosen format (`json`, `json-pretty`, `msgpack`)
+- Trigger a check (validates per-table constraints *and* cross-table `@ref`
+  — the latter is a fix on top of the CLI `check` command, which currently
+  skips it)
+- Inspect diagnostics rendered with severity color-coding
+
+**Note:** the data-validation feature (`/api/validate`) is **not yet
+implemented** — the UI shows a TODO and the endpoint returns
+`501 Not Implemented`. The CLI flag is `webui`; everything else is the
+same shape as `build` / `check`.
+
 ## Development
 
 ```bash
