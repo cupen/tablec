@@ -13,6 +13,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Example(c) => {
             c.run()?;
         }
+        Command::Webui(c) => {
+            c.run()?;
+        }
     }
     Ok(())
 }

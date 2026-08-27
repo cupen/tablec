@@ -1,0 +1,16 @@
+/* tablec webui — global styles only.
+   Per-component styles live inside each <x-*> element's Shadow DOM. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+
+app-shell { display: block; height: 100%; }

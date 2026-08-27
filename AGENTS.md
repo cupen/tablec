@@ -21,7 +21,15 @@ cargo test                                   # unit + integration tests
 target/debug/tablec build                    # build a directory; auto-discovers tablec.toml
 target/debug/tablec check path/to/files
 target/debug/tablec example -o out.xlsx -r 10
+target/debug/tablec webui --dir ./data       # launch local webui on 127.0.0.1:<OS-assigned>; auto-opens browser
+target/debug/tablec webui --no-browser --port 8080   # for CI / remote boxes
 ```
+
+The `webui` subcommand spins up an HTTP server serving a Web Components SPA
+for previewing, building and checking table files. Data validation (custom
+`@validator(...)` etc.) is **not yet implemented** — the `/api/validate`
+endpoint returns 501 with a TODO body. Plugin paths must be passed via CLI
+flag only; HTTP requests that include `plugin_paths` are rejected.
 
 Python bindings (managed by `uv`):
 
