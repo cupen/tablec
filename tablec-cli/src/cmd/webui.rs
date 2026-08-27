@@ -9,6 +9,11 @@ use crate::web::{self, WebuiState};
 /// Web Components UI for previewing, building and checking table files.
 #[derive(Args, Debug)]
 pub struct WebuiCommand {
+    /// TCP port (positional). `0` lets the OS pick a free port.
+    /// When both a positional port and `--port` are given, `--port` wins.
+    #[arg(value_name = "PORT")]
+    pub port_pos: Option<u16>,
+
     /// Directory to preview/build. Defaults to the current working directory.
     #[arg(long, short = 'd')]
     pub dir: Option<PathBuf>,
@@ -17,7 +22,8 @@ pub struct WebuiCommand {
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
-    /// TCP port. `0` lets the OS pick a free port.
+    /// TCP port. `0` lets the OS pick a free port. Wins over the positional
+    /// port if both are given.
     #[arg(long, default_value_t = 0)]
     pub port: u16,
 
@@ -36,6 +42,17 @@ pub struct WebuiCommand {
     /// Plugin `.so`/`.dylib` path. May be repeated.
     #[arg(long = "plugin-path")]
     pub plugin_path: Vec<PathBuf>,
+}
+
+impl WebuiCommand {
+    /// Resolve the final port. `--port` wins; if both are `0`/absent,
+    /// returns `0` (OS-assigned).
+    pub fn resolved_port(&self) -> u16 {
+        if self.port != 0 {
+            return self.port;
+        }
+        self.port_pos.unwrap_or(0)
+    }
 }
 
 impl WebuiCommand {
@@ -62,7 +79,7 @@ impl WebuiCommand {
         let app = web::router(state.clone());
 
         let host = self.host.clone();
-        let port = self.port;
+        let port = self.resolved_port();
         let no_browser = self.no_browser;
 
         // Tokio runtime — main is sync; we drive axum from a single-threaded executor.
@@ -132,10 +149,51 @@ mod tests {
                 assert!(w.dir.is_none());
                 assert_eq!(w.host, "127.0.0.1");
                 assert_eq!(w.port, 0);
+                assert!(w.port_pos.is_none());
+                assert_eq!(w.resolved_port(), 0);
                 assert!(!w.no_browser);
                 assert!(w.config.is_none());
                 assert!(w.parser.is_none());
                 assert!(w.plugin_path.is_empty());
+            }
+            _ => panic!("expected Webui variant"),
+        }
+    }
+
+    #[test]
+    fn webui_command_parses_positional_port() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(subcommand)]
+            cmd: crate::cli::Command,
+        }
+        let parsed = Wrap::parse_from(["tablec", "webui", "8765"]).cmd;
+        match parsed {
+            crate::cli::Command::Webui(w) => {
+                assert_eq!(w.port_pos, Some(8765));
+                assert_eq!(w.port, 0);
+                assert_eq!(w.resolved_port(), 8765);
+            }
+            _ => panic!("expected Webui variant"),
+        }
+    }
+
+    #[test]
+    fn webui_command_flag_overrides_positional_port() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(subcommand)]
+            cmd: crate::cli::Command,
+        }
+        // Both positional and --port: --port wins.
+        let parsed = Wrap::parse_from(["tablec", "webui", "1111", "--port", "2222"]).cmd;
+        match parsed {
+            crate::cli::Command::Webui(w) => {
+                assert_eq!(w.port_pos, Some(1111));
+                assert_eq!(w.port, 2222);
+                assert_eq!(w.resolved_port(), 2222);
             }
             _ => panic!("expected Webui variant"),
         }
