@@ -31,6 +31,7 @@ use crate::web::state::WebuiState;
 const INDEX_HTML: &str = include_str!("../../webui/index.html");
 const APP_JS: &str = include_str!("../../webui/app.js");
 const STYLE_CSS: &str = include_str!("../../webui/style.css");
+const VENDOR_LIT: &str = include_str!("../../webui/vendor/lit.js");
 
 pub async fn index_html() -> Response {
     html_response(INDEX_HTML)
@@ -42,6 +43,12 @@ pub async fn app_js() -> Response {
 
 pub async fn style_css() -> Response {
     css_response(STYLE_CSS)
+}
+
+/// Vendored Lit 3 ESM bundle (see `webui/vendor/lit.js`). Kept in-repo so the
+/// webui has no runtime network dependency.
+pub async fn vendor_lit() -> Response {
+    js_response(VENDOR_LIT)
 }
 
 fn html_response(body: &str) -> Response {
@@ -880,6 +887,38 @@ mod tests {
             .unwrap_or("")
             .to_string();
         assert!(ct.starts_with("text/css"), "got content-type {ct}");
+    }
+
+    #[tokio::test]
+    async fn static_vendor_lit_returns_javascript_content_type() {
+        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/static/vendor/lit.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            ct.starts_with("application/javascript"),
+            "got content-type {ct}"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let s = std::str::from_utf8(&body).unwrap();
+        // Sanity-check that the vendored Lit bundle really is Lit 3 with the
+        // export shape we rely on (LitElement + lit-html).
+        assert!(s.contains("LitElement") || s.contains("lit-element"), "vendored file missing Lit");
     }
 
     // -------------------------------------------------------------------------

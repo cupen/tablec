@@ -38,6 +38,7 @@ pub fn router(state: Arc<WebuiState>) -> Router {
         .route("/", get(handlers::index_html))
         .route("/static/app.js", get(handlers::app_js))
         .route("/static/style.css", get(handlers::style_css))
+        .route("/static/vendor/lit.js", get(handlers::vendor_lit))
         .route("/api/health", get(handlers::api_health))
         .route("/api/state", get(handlers::api_state))
         .route("/api/files", get(handlers::api_files))
