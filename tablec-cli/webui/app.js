@@ -4,6 +4,11 @@
 // connectedCallback, and listens via the local `bus` pub/sub. State is
 // kept in `appState` (a plain object) and mutated via setters that emit
 // bus events; components re-render on event receipt.
+//
+// Aesthetic: "The Cell" — dark IDE meets spreadsheet. Column letters
+// (A, B, C…) above the grid, row numbers on the left, a cell-coordinate
+// formula bar at the top. The signature element is the formula bar
+// reading `[B2] ▸ Items.name`.
 
 const bus = (() => {
   const map = new Map();
@@ -27,53 +32,119 @@ const bus = (() => {
 const appState = {
   dir: '.',
   files: [],          // [{ name, path, size, modified_secs }]
-  selectedPath: null, // currently-selected file
+  selectedPath: null,
   sheets: [],         // [{ name, row_count, col_count }]
   activeSheet: null,
-  preview: null,      // { sheet, rows: [[cell,...]] }
+  preview: null,      // { sheet, rows: [[cell,...]], max_rows }
+  selectedCell: null, // { row, col } — currently-focused cell in the grid
   parserNames: [],
   activeParser: 'standard',
   configPresent: false,
   configPath: null,
   busy: false,
-  lastResult: null,   // { diagnostics, output_path, format, ... }
+  lastResult: null,   // { kind, status, payload }
 };
 
-// -----------------------------------------------------------------------------
-// <app-shell> — top-level layout
-// -----------------------------------------------------------------------------
+// ---------- color tokens, duplicated from style.css because shadow roots
+//            can't see :root vars defined in light DOM. Keep in sync. ----
+const TOKENS = `
+  :host {
+    --ink:     #0E1116;
+    --panel:   #161A21;
+    --panel-2: #1B2029;
+    --rule:    #22272F;
+    --rule-2:  #2A3140;
+    --paper:   #E6EAF2;
+    --graphite:#7A8497;
+    --dim:     #4B5566;
+    --amber:   #F5C242;
+    --cyan:    #5DD3C4;
+    --rose:    #E06C75;
+    --mono:    ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+    --sans:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+`;
+
+// =============================================================================
+// <app-shell> — top-level layout: title bar · 3 columns · status footer
+// =============================================================================
 
 class AppShell extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
-        :host { display: grid; grid-template-rows: 48px 1fr 24px; height: 100%; }
-        header {
-          display: flex; align-items: center; gap: 12px;
-          padding: 0 16px; background: #24292f; color: #fff;
-          font-weight: 600;
+      <style>${TOKENS}
+        :host {
+          display: grid;
+          grid-template-rows: 44px 1fr 24px;
+          height: 100%;
+          background: var(--ink);
+          color: var(--paper);
+          font: 13px/1.45 var(--sans);
         }
-        header .brand { font-size: 16px; }
-        header .spacer { flex: 1; }
-        header .cfg { font-size: 12px; opacity: .8; font-weight: 400; }
+        header {
+          display: flex; align-items: center; gap: 16px;
+          padding: 0 14px;
+          background: linear-gradient(to bottom, #181C25, var(--panel));
+          border-bottom: 1px solid var(--rule);
+        }
+        .brand {
+          font: 600 13px/1 var(--mono);
+          letter-spacing: 0.04em;
+          color: var(--paper);
+          display: flex; align-items: center; gap: 8px;
+        }
+        .brand .mark {
+          display: inline-grid;
+          grid-template-columns: repeat(3, 8px);
+          grid-template-rows: repeat(2, 8px);
+          gap: 1px;
+        }
+        .brand .mark i { background: var(--amber); display: block; }
+        .brand .mark i:nth-child(1) { background: var(--amber); }
+        .brand .mark i:nth-child(2) { background: var(--rule-2); }
+        .brand .mark i:nth-child(3) { background: var(--cyan); opacity: .7; }
+        .brand .mark i:nth-child(4) { background: var(--rule-2); }
+        .brand .mark i:nth-child(5) { background: var(--paper); }
+        .brand .mark i:nth-child(6) { background: var(--rule-2); }
+        .brand .ver {
+          font: 400 10px/1 var(--mono);
+          color: var(--graphite);
+          padding: 2px 5px;
+          border: 1px solid var(--rule-2);
+          border-radius: 2px;
+        }
+        .spacer { flex: 1; }
+        .cfg {
+          font: 400 11px/1 var(--mono);
+          color: var(--graphite);
+          display: flex; gap: 12px;
+        }
+        .cfg span b { color: var(--paper); font-weight: 600; }
         main {
           display: grid;
-          grid-template-columns: 240px 1fr 320px;
+          grid-template-columns: 260px 1fr 320px;
+          background: var(--rule);
           gap: 1px;
-          background: #d0d7de;
           overflow: hidden;
         }
-        main > * { background: #fff; overflow: auto; }
+        main > * {
+          background: var(--panel);
+          overflow: auto;
+          min-width: 0;
+        }
         footer {
-          background: #f6f8fa; color: #57606a;
-          font-size: 12px;
-          padding: 0 16px;
-          display: flex; align-items: center; gap: 12px;
+          background: var(--panel);
+          border-top: 1px solid var(--rule);
+          display: flex; align-items: center;
         }
       </style>
       <header>
-        <span class="brand">tablec webui</span>
+        <span class="brand">
+          <span class="mark"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          tablec
+          <span class="ver">webui</span>
+        </span>
         <dir-picker></dir-picker>
         <span class="spacer"></span>
         <span class="cfg" id="cfg"></span>
@@ -85,49 +156,79 @@ class AppShell extends HTMLElement {
       </main>
       <footer><status-bar></status-bar></footer>
     `;
-    this.shadowRoot.getElementById('cfg').textContent =
-      `parser=${appState.activeParser}` +
-      (appState.configPath ? ` · cfg=${appState.configPath}` : ' · cfg=(default)');
+    this.shadowRoot.getElementById('cfg').innerHTML =
+      `<span>parser <b id="parser">${escapeHtml(appState.activeParser)}</b></span>` +
+      `<span>cfg <b id="cfg-path">${appState.configPath ? escapeHtml(appState.configPath) : '(default)'}</b></span>`;
     bus.on('app:state', (s) => {
-      const el = this.shadowRoot.getElementById('cfg');
-      el.textContent =
-        `parser=${s.activeParser}` +
-        (s.configPath ? ` · cfg=${s.configPath}` : ' · cfg=(default)');
+      this.shadowRoot.getElementById('parser').textContent = s.activeParser;
+      this.shadowRoot.getElementById('cfg-path').textContent =
+        s.configPath ?? '(default)';
     });
     refreshState();
   }
 }
 customElements.define('app-shell', AppShell);
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // <dir-picker>
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 class DirPicker extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
-        :host { display: flex; gap: 6px; align-items: center; }
+      <style>${TOKENS}
+        :host { display: flex; gap: 6px; align-items: center; flex: 1; max-width: 640px; }
+        .prefix {
+          font: 400 11px/1 var(--mono);
+          color: var(--graphite);
+          padding: 4px 6px;
+          background: var(--panel-2);
+          border: 1px solid var(--rule);
+          border-right: none;
+          border-radius: 3px 0 0 3px;
+        }
         input {
-          background: #32383f; color: #fff; border: 1px solid #444c56;
-          border-radius: 4px; padding: 4px 8px; font: inherit; width: 280px;
+          flex: 1; min-width: 0;
+          font: 400 12px/1 var(--mono);
+          color: var(--paper);
+          background: var(--panel-2);
+          border: 1px solid var(--rule);
+          padding: 5px 8px;
+          outline: none;
+          border-radius: 0;
         }
+        input:focus { border-color: var(--amber); }
         button {
-          background: #32383f; color: #fff; border: 1px solid #444c56;
-          border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit;
+          font: 400 11px/1 var(--mono);
+          color: var(--paper);
+          background: var(--panel-2);
+          border: 1px solid var(--rule);
+          padding: 6px 10px;
+          cursor: pointer;
+          border-radius: 3px;
+          letter-spacing: 0.02em;
         }
-        button:hover { background: #444c56; }
+        button:hover { background: var(--rule); border-color: var(--rule-2); }
+        button.go {
+          background: var(--amber);
+          color: var(--ink);
+          border-color: var(--amber);
+          font-weight: 600;
+        }
+        button.go:hover { filter: brightness(1.08); }
+        button.reload { font-family: var(--mono); }
       </style>
-      <input id="dir" value="${appState.dir}">
-      <button id="go">打开</button>
-      <button id="reload" title="重新扫描目录">⟳</button>
+      <span class="prefix">~/</span>
+      <input id="dir" value="${escapeAttr(appState.dir)}" spellcheck="false" autocomplete="off">
+      <button id="go" class="go">打开</button>
+      <button id="reload" class="reload" title="重新扫描目录">⟳</button>
     `;
     const input = shadow.getElementById('dir');
     const go = shadow.getElementById('go');
     const reload = shadow.getElementById('reload');
     go.onclick = async () => {
-      appState.dir = input.value || '.';
+      appState.dir = input.value.trim() || '.';
       bus.emit('app:state', { ...appState });
       await refreshState();
       bus.emit('app:dir-changed', appState.dir);
@@ -138,27 +239,78 @@ class DirPicker extends HTMLElement {
 }
 customElements.define('dir-picker', DirPicker);
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // <file-list>
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 class FileList extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
+      <style>${TOKENS}
         :host { display: block; }
-        .empty { padding: 16px; color: #57606a; font-size: 13px; }
+        .head {
+          position: sticky; top: 0; z-index: 2;
+          padding: 10px 14px 8px;
+          background: var(--panel);
+          border-bottom: 1px solid var(--rule);
+          font: 400 10px/1 var(--mono);
+          color: var(--graphite);
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          display: flex; justify-content: space-between; align-items: baseline;
+        }
+        .head .count { color: var(--paper); font-weight: 600; }
         ul { list-style: none; padding: 0; margin: 0; }
         li {
-          padding: 6px 12px; cursor: pointer; border-bottom: 1px solid #eaeef2;
-          display: flex; flex-direction: column; gap: 2px;
+          padding: 8px 14px 8px 16px;
+          cursor: pointer;
+          border-bottom: 1px solid var(--rule);
+          border-left: 3px solid transparent;
+          display: flex; flex-direction: column; gap: 3px;
+          transition: background 80ms ease, border-color 80ms ease;
         }
-        li:hover { background: #f6f8fa; }
-        li.selected { background: #ddf4ff; }
-        .name { font-weight: 500; }
-        .meta { font-size: 11px; color: #57606a; }
+        li:hover { background: var(--panel-2); }
+        li.selected {
+          background: var(--panel-2);
+          border-left-color: var(--amber);
+        }
+        .name {
+          font: 500 13px/1.2 var(--sans);
+          color: var(--paper);
+          display: flex; align-items: center; gap: 6px;
+        }
+        .name .ext {
+          font: 400 10px/1 var(--mono);
+          color: var(--cyan);
+          padding: 1px 4px;
+          background: rgba(93,211,196,0.08);
+          border: 1px solid rgba(93,211,196,0.18);
+          border-radius: 2px;
+        }
+        .meta {
+          font: 400 11px/1 var(--mono);
+          color: var(--graphite);
+          letter-spacing: 0.02em;
+        }
+        .empty {
+          padding: 16px 14px;
+          color: var(--graphite);
+          font-size: 12px;
+          line-height: 1.55;
+        }
+        .empty code {
+          font: 400 11px/1 var(--mono);
+          color: var(--paper);
+          background: var(--panel-2);
+          padding: 1px 4px;
+          border-radius: 2px;
+        }
       </style>
+      <div class="head">
+        <span>FILES</span>
+        <span class="count" id="count">0</span>
+      </div>
       <div id="root"></div>
     `;
     this.render();
@@ -168,14 +320,19 @@ class FileList extends HTMLElement {
 
   render() {
     const root = this.shadowRoot.getElementById('root');
+    const count = this.shadowRoot.getElementById('count');
+    count.textContent = String(appState.files.length).padStart(2, '0');
     if (!appState.files.length) {
-      root.innerHTML = `<div class="empty">该目录下没有可识别的数据文件（.xlsx/.xls/.xlsb/.ods）</div>`;
+      root.innerHTML = `<div class="empty">该目录下没有可识别的数据文件。<br>支持 <code>.xlsx</code> <code>.xls</code> <code>.xlsb</code> <code>.ods</code></div>`;
       return;
     }
     root.innerHTML = `<ul>${appState.files.map((f) => `
       <li data-path="${escapeAttr(f.path)}" class="${appState.selectedPath === f.path ? 'selected' : ''}">
-        <span class="name">${escapeHtml(f.name)}</span>
-        <span class="meta">${humanSize(f.size)} · ${new Date(f.modified_secs * 1000).toLocaleString()}</span>
+        <span class="name">
+          ${escapeHtml(f.name)}
+          <span class="ext">${escapeHtml(extOf(f.name))}</span>
+        </span>
+        <span class="meta">${humanSize(f.size)}  ·  ${new Date(f.modified_secs * 1000).toLocaleString()}</span>
       </li>`).join('')}</ul>`;
     root.querySelectorAll('li').forEach((li) => {
       li.onclick = () => bus.emit('app:select-file', { path: li.dataset.path });
@@ -184,41 +341,190 @@ class FileList extends HTMLElement {
 }
 customElements.define('file-list', FileList);
 
-// -----------------------------------------------------------------------------
-// <file-preview>
-// -----------------------------------------------------------------------------
+// =============================================================================
+// <file-preview> — sheet tabs + spreadsheet grid with cell coord formula bar
+// =============================================================================
 
 class FilePreview extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
-        :host { display: flex; flex-direction: column; height: 100%; }
-        .empty { padding: 16px; color: #57606a; }
+      <style>${TOKENS}
+        :host { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--panel); }
+
+        /* ---- formula bar (signature element) ---- */
+        .formula {
+          display: grid;
+          grid-template-columns: 64px 1fr;
+          align-items: stretch;
+          border-bottom: 1px solid var(--rule);
+          background: var(--panel-2);
+          font-family: var(--mono);
+        }
+        .formula .coord {
+          font: 600 12px/1 var(--mono);
+          color: var(--ink);
+          background: var(--amber);
+          padding: 9px 10px;
+          letter-spacing: 0.04em;
+          display: flex; align-items: center; justify-content: center;
+          border-right: 1px solid var(--rule);
+        }
+        .formula .coord.muted { background: transparent; color: var(--dim); border-color: var(--rule); }
+        .formula .fn {
+          display: flex; align-items: center; gap: 8px;
+          padding: 0 12px;
+          font: 400 12px/1.4 var(--mono);
+          color: var(--paper);
+          overflow: hidden;
+        }
+        .formula .fn .sep { color: var(--graphite); }
+        .formula .fn .src { color: var(--graphite); font-size: 11px; }
+        .formula .fn .val {
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          color: var(--paper);
+        }
+        .formula .fn .val.num { color: var(--cyan); font-variant-numeric: tabular-nums; }
+        .formula .fn .val.bool { color: var(--amber); }
+        .formula .fn .val.empty { color: var(--dim); font-style: italic; }
+
+        /* ---- tabs ---- */
         .tabs {
-          display: flex; gap: 0; padding: 8px 8px 0; border-bottom: 1px solid #d0d7de;
-          background: #f6f8fa; flex-wrap: wrap;
+          display: flex; gap: 0;
+          padding: 0 12px;
+          background: var(--panel-2);
+          border-bottom: 1px solid var(--rule);
+          overflow-x: auto;
+          scrollbar-width: none;
         }
+        .tabs::-webkit-scrollbar { display: none; }
         .tab {
-          padding: 6px 12px; cursor: pointer; border-radius: 4px 4px 0 0;
-          background: #eaeef2; margin-right: 2px; font-size: 13px;
+          padding: 8px 14px 8px 12px;
+          cursor: pointer;
+          font: 400 12px/1 var(--mono);
+          color: var(--graphite);
+          border-bottom: 2px solid transparent;
+          transition: color 80ms, border-color 80ms;
+          white-space: nowrap;
+          display: flex; align-items: baseline; gap: 6px;
         }
-        .tab.active { background: #fff; border: 1px solid #d0d7de; border-bottom-color: #fff; }
-        .body { flex: 1; overflow: auto; padding: 12px; }
-        table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
-        th, td { border: 1px solid #d0d7de; padding: 4px 8px; text-align: left; vertical-align: top; }
-        th { background: #f6f8fa; position: sticky; top: 0; }
-        .schema th { background: #fff8c5; }
-        .schema td:nth-child(1) { color: #57606a; font-style: italic; }
-        .num { text-align: right; font-variant-numeric: tabular-nums; }
-        .null { color: #8c959f; }
+        .tab:hover { color: var(--paper); }
+        .tab.active {
+          color: var(--paper);
+          border-bottom-color: var(--amber);
+        }
+        .tab .size {
+          font-size: 10px;
+          color: var(--dim);
+          letter-spacing: 0.04em;
+        }
+
+        /* ---- spreadsheet grid ---- */
+        .body {
+          flex: 1; min-height: 0;
+          overflow: auto;
+          background: var(--ink);
+        }
+        table.grid {
+          border-collapse: collapse;
+          font: 400 12px/1.3 var(--mono);
+          color: var(--paper);
+          font-variant-numeric: tabular-nums;
+        }
+        table.grid th, table.grid td {
+          border-right: 1px solid var(--rule);
+          border-bottom: 1px solid var(--rule);
+          padding: 4px 8px;
+          text-align: left;
+          white-space: nowrap;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        table.grid th {
+          background: var(--panel-2);
+          color: var(--graphite);
+          font-weight: 500;
+          position: sticky;
+          z-index: 1;
+          font-size: 11px;
+          letter-spacing: 0.04em;
+          user-select: none;
+        }
+        /* column-letter row sticks to top */
+        table.grid tr.letters th {
+          top: 0;
+          z-index: 3;
+        }
+        /* row-number column sticks to left */
+        table.grid th.rowh {
+          left: 0;
+          z-index: 2;
+          text-align: right;
+          color: var(--graphite);
+          min-width: 40px;
+          background: var(--panel-2);
+        }
+        /* the corner where row # col meets letter row */
+        table.grid th.corner {
+          z-index: 4;
+          background: var(--panel-2);
+          color: var(--dim);
+        }
+        table.grid td.cell {
+          cursor: cell;
+        }
+        table.grid td.cell:hover { background: rgba(245,194,66,0.06); }
+        table.grid td.selected {
+          background: rgba(245,194,66,0.12);
+          box-shadow: inset 0 0 0 1px var(--amber);
+          color: var(--paper);
+        }
+        table.grid td.schema { color: var(--graphite); font-style: italic; }
+        table.grid td.schema.col-name { color: var(--cyan); font-style: normal; font-weight: 500; }
+        table.grid td.num { text-align: right; color: var(--cyan); }
+        table.grid td.bool { color: var(--amber); }
+        table.grid td.null { color: var(--dim); }
+
+        .empty {
+          padding: 24px;
+          color: var(--graphite);
+          font-size: 13px;
+          line-height: 1.6;
+        }
+        .empty .hint {
+          font: 400 11px/1.4 var(--mono);
+          color: var(--dim);
+          margin-top: 6px;
+        }
       </style>
-      <div id="root" class="empty">请选择左侧文件以预览。</div>
+
+      <div class="formula">
+        <div class="coord muted" id="coord">—</div>
+        <div class="fn" id="fn">
+          <span class="src" id="fn-src"></span>
+          <span class="sep" id="fn-sep" style="display:none">▸</span>
+          <span class="val empty" id="fn-val">点击任意单元格查看坐标</span>
+        </div>
+      </div>
+
+      <div class="tabs" id="tabs"></div>
+      <div class="body" id="body">
+        <div class="empty">请选择左侧文件以预览。</div>
+      </div>
     `;
+    this.tabs = shadow.getElementById('tabs');
+    this.body = shadow.getElementById('body');
+    this.coordEl = shadow.getElementById('coord');
+    this.fnSrc = shadow.getElementById('fn-src');
+    this.fnSep = shadow.getElementById('fn-sep');
+    this.fnVal = shadow.getElementById('fn-val');
+
     this.render();
     bus.on('app:select-file', ({ path }) => this.onSelect(path));
-    bus.on('app:sheet', () => this.render());
-    bus.on('app:preview', () => this.render());
+    bus.on('app:sheet', () => { this.renderTabs(); this.renderBody(); });
+    bus.on('app:preview', () => this.renderBody());
+    bus.on('app:cell', () => this.renderFormula());
   }
 
   async onSelect(path) {
@@ -226,8 +532,10 @@ class FilePreview extends HTMLElement {
     appState.preview = null;
     appState.sheets = [];
     appState.activeSheet = null;
-    this.render();
-    bus.emit('app:select-file', { path });
+    appState.selectedCell = null;
+    this.renderTabs();
+    this.renderBody();
+    this.renderFormula();
     try {
       const sheets = await getJson(`/api/sheets?path=${encodeURIComponent(path)}`);
       appState.sheets = sheets;
@@ -236,11 +544,11 @@ class FilePreview extends HTMLElement {
         bus.emit('app:sheet', { sheet: appState.activeSheet });
         await this.loadPreview();
       } else {
-        this.render();
+        this.renderBody();
       }
     } catch (e) {
       appState.lastResult = { error: String(e) };
-      this.render();
+      this.renderBody();
     }
   }
 
@@ -251,174 +559,364 @@ class FilePreview extends HTMLElement {
         `/api/preview?path=${encodeURIComponent(appState.selectedPath)}` +
         `&sheet=${encodeURIComponent(appState.activeSheet)}&max_rows=120`);
       appState.preview = grid;
+      // pick the first non-schema cell as initial selection if available
+      if (grid.rows && grid.rows.length > 5) {
+        appState.selectedCell = { row: 5, col: 0 };
+      } else if (grid.rows && grid.rows.length) {
+        appState.selectedCell = { row: 0, col: 0 };
+      }
       bus.emit('app:preview', grid);
+      bus.emit('app:cell', appState.selectedCell);
     } catch (e) {
       appState.lastResult = { error: String(e) };
-      this.render();
+      this.renderBody();
     }
   }
 
   render() {
-    const root = this.shadowRoot.getElementById('root');
-    if (!appState.selectedPath) {
-      root.outerHTML = `<div id="root" class="empty">请选择左侧文件以预览。</div>`;
-      return;
-    }
+    this.renderTabs();
+    this.renderBody();
+    this.renderFormula();
+  }
+
+  renderTabs() {
     if (!appState.sheets.length) {
-      root.outerHTML = `<div id="root" class="empty">${escapeHtml(appState.selectedPath)} 没有可预览的 sheet。</div>`;
+      this.tabs.innerHTML = '';
       return;
     }
-    root.outerHTML = `
-      <div id="root" style="display:flex; flex-direction:column; height:100%;">
-        <div class="tabs">
-          ${appState.sheets.map((s) => `
-            <div class="tab ${appState.activeSheet === s.name ? 'active' : ''}"
-                 data-sheet="${escapeAttr(s.name)}">
-              ${escapeHtml(s.name)}
-              <small>(${s.row_count ?? '?'}×${s.col_count ?? '?'})</small>
-            </div>`).join('')}
-        </div>
-        <div class="body" id="body"></div>
-      </div>`;
-    // After re-render the element is new; re-query.
-    const newRoot = this.shadowRoot.getElementById('root');
-    newRoot.querySelectorAll('.tab').forEach((t) => {
+    this.tabs.innerHTML = appState.sheets.map((s) => `
+      <div class="tab ${appState.activeSheet === s.name ? 'active' : ''}" data-sheet="${escapeAttr(s.name)}">
+        <span>${escapeHtml(s.name)}</span>
+        <span class="size">${s.row_count ?? '?'}×${s.col_count ?? '?'}</span>
+      </div>`).join('');
+    this.tabs.querySelectorAll('.tab').forEach((t) => {
       t.onclick = () => {
         appState.activeSheet = t.dataset.sheet;
         bus.emit('app:sheet', { sheet: appState.activeSheet });
         this.loadPreview();
       };
     });
-    this.renderBody();
+  }
+
+  renderFormula() {
+    const c = appState.selectedCell;
+    if (!c) {
+      this.coordEl.textContent = '—';
+      this.coordEl.classList.add('muted');
+      this.fnSrc.textContent = '';
+      this.fnSep.style.display = 'none';
+      this.fnVal.textContent = '点击任意单元格查看坐标';
+      this.fnVal.className = 'val empty';
+      return;
+    }
+    const ref = colLetter(c.col) + (c.row + 1);
+    this.coordEl.textContent = ref;
+    this.coordEl.classList.remove('muted');
+    // "src" = file + sheet name (like Excel's address bar for context)
+    this.fnSrc.textContent = `${baseName(appState.selectedPath || '')} · ${appState.activeSheet || ''}`;
+    this.fnSep.style.display = '';
+    // value
+    const v = (appState.preview?.rows?.[c.row] || [])[c.col];
+    this.setFnValue(v);
+  }
+
+  setFnValue(cell) {
+    const val = this.fnVal;
+    val.classList.remove('num', 'bool', 'empty');
+    if (cell == null) {
+      val.textContent = '∅  empty';
+      val.classList.add('empty');
+    } else if (typeof cell === 'number') {
+      val.textContent = String(cell);
+      val.classList.add('num');
+    } else if (typeof cell === 'string') {
+      val.textContent = `"${cell}"`;
+    } else if (typeof cell === 'boolean') {
+      val.textContent = cell ? 'TRUE' : 'FALSE';
+      val.classList.add('bool');
+    } else if (typeof cell === 'object') {
+      if ('Float' in cell) { val.textContent = String(cell.Float); val.classList.add('num'); }
+      else if ('Bool' in cell) { val.textContent = cell.Bool ? 'TRUE' : 'FALSE'; val.classList.add('bool'); }
+      else if ('Str' in cell) { val.textContent = `"${cell.Str}"`; }
+      else if ('DateTime' in cell) { val.textContent = String(cell.DateTime); }
+      else if ('Duration' in cell) { val.textContent = String(cell.Duration); }
+      else { val.textContent = JSON.stringify(cell); }
+    } else {
+      val.textContent = String(cell);
+    }
   }
 
   renderBody() {
-    const body = this.shadowRoot.getElementById('body');
-    if (!body) return;
+    if (!appState.selectedPath) {
+      this.body.innerHTML = `<div class="empty">请选择左侧文件以预览。<div class="hint">支持 .xlsx / .xls / .xlsb / .ods</div></div>`;
+      return;
+    }
+    if (!appState.sheets.length) {
+      this.body.innerHTML = `<div class="empty">${escapeHtml(appState.selectedPath)} 没有可预览的 sheet。</div>`;
+      return;
+    }
     if (!appState.preview) {
-      body.innerHTML = `<div class="empty">加载中…</div>`;
+      this.body.innerHTML = `<div class="empty">加载中…</div>`;
       return;
     }
     const rows = appState.preview.rows || [];
-    const isSchema = (i) => i < 5;
-    body.innerHTML = `
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            ${rows[0]?.map((_, c) => `<th>col ${c + 1}</th>`).join('') ?? ''}
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row, ri) => `
-            <tr class="${isSchema(ri) ? 'schema' : ''}">
-              <th>${ri + 1}${ri < 5 ? ` <small>${schemaLabel(ri)}</small>` : ''}</th>
-              ${row.map((cell) => renderCell(cell, isSchema(ri))).join('')}
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
+    if (!rows.length) {
+      this.body.innerHTML = `<div class="empty">空 sheet。</div>`;
+      return;
+    }
+    const ncols = Math.max(...rows.map(r => r.length), 1);
+    const isSchemaRow = (i) => i < 5;
+    const isSchemaColName = (i) => i === 0;
+
+    let html = `<table class="grid"><thead><tr class="letters"><th class="corner"></th>`;
+    for (let c = 0; c < ncols; c++) html += `<th>${colLetter(c)}</th>`;
+    html += `</tr></thead><tbody>`;
+    rows.forEach((row, ri) => {
+      html += `<tr>`;
+      html += `<th class="rowh">${ri + 1}</th>`;
+      const rowCls = isSchemaRow(ri) ? 'schema' : '';
+      for (let c = 0; c < ncols; c++) {
+        const cell = row[c];
+        const sel = appState.selectedCell
+          && appState.selectedCell.row === ri
+          && appState.selectedCell.col === c;
+        const cls = [
+          'cell',
+          rowCls,
+          isSchemaColName(c) ? 'col-name' : '',
+          cellClass(cell),
+          sel ? 'selected' : '',
+        ].filter(Boolean).join(' ');
+        const content = cellText(cell);
+        html += `<td class="${cls}" data-row="${ri}" data-col="${c}">${content}</td>`;
+      }
+      html += `</tr>`;
+    });
+    html += `</tbody></table>`;
+    this.body.innerHTML = html;
+    // delegate cell clicks
+    this.body.querySelectorAll('td.cell').forEach((td) => {
+      td.onclick = () => {
+        const r = parseInt(td.dataset.row, 10);
+        const co = parseInt(td.dataset.col, 10);
+        appState.selectedCell = { row: r, col: co };
+        bus.emit('app:cell', appState.selectedCell);
+      };
+    });
   }
 }
 customElements.define('file-preview', FilePreview);
 
-function renderCell(cell, isSchema) {
-  if (cell === null || cell === undefined) return `<td class="null">·</td>`;
-  switch (cell.Bool ?? null) {
-    // Booleans serialize to bare true/false — render with style.
+function cellText(cell) {
+  if (cell == null) return '<span style="color:var(--dim)">·</span>';
+  if (typeof cell === 'number') return escapeHtml(String(cell));
+  if (typeof cell === 'string') return escapeHtml(cell);
+  if (typeof cell === 'boolean') return cell ? '✓' : '✗';
+  if (typeof cell === 'object') {
+    if ('Float' in cell) return escapeHtml(String(cell.Float));
+    if ('Bool' in cell) return cell.Bool ? '✓' : '✗';
+    if ('Str' in cell) return escapeHtml(cell.Str);
+    if ('DateTime' in cell) return escapeHtml(String(cell.DateTime));
+    if ('Duration' in cell) return escapeHtml(String(cell.Duration));
+    return escapeHtml(JSON.stringify(cell));
   }
-  if (typeof cell === 'number') {
-    return `<td class="num">${cell}</td>`;
-  }
-  if (typeof cell === 'string') {
-    return `<td>${escapeHtml(cell)}</td>`;
-  }
-  if (typeof cell === 'boolean') {
-    return `<td>${cell ? '✓' : '✗'}</td>`;
-  }
-  // nested objects (Duration/DateTime come through as plain strings already
-  // because of Cell enum).
-  return `<td class="null">${escapeHtml(String(cell))}</td>`;
+  return escapeHtml(String(cell));
+}
+function cellClass(cell) {
+  if (cell == null) return 'null';
+  if (typeof cell === 'number') return 'num';
+  if (typeof cell === 'boolean') return 'bool';
+  if (typeof cell === 'object' && 'Float' in cell) return 'num';
+  if (typeof cell === 'object' && 'Bool' in cell) return 'bool';
+  return '';
 }
 
-function schemaLabel(i) {
-  return ['name', 'type', 'comment', 'constraint', 'reserved'][i] || '';
-}
-
-// -----------------------------------------------------------------------------
+// =============================================================================
 // <build-panel>
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 class BuildPanel extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
-        :host { display: block; padding: 12px; }
-        h3 { margin: 0 0 8px; font-size: 14px; }
-        .row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
-        select, button {
-          padding: 4px 8px; font: inherit; border: 1px solid #d0d7de;
-          border-radius: 4px; background: #fff;
+      <style>${TOKENS}
+        :host { display: block; padding: 14px; color: var(--paper); }
+        .head {
+          font: 400 10px/1 var(--mono);
+          color: var(--graphite);
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          margin-bottom: 10px;
         }
-        button {
-          background: #2da44e; color: #fff; border-color: #1a7f37; cursor: pointer;
-          padding: 6px 12px;
+        .group {
+          margin-bottom: 12px;
         }
-        button:hover { background: #1a7f37; }
-        button.check { background: #0969da; border-color: #0969da; }
-        button.check:hover { background: #0550ae; }
-        button.validate {
-          background: #bf8700; border-color: #9a6700;
+        label.row {
+          display: flex; gap: 8px; align-items: center;
+          font: 400 11px/1 var(--mono);
+          color: var(--graphite);
+          margin-bottom: 6px;
+          letter-spacing: 0.04em;
         }
-        button.validate:hover { background: #9a6700; }
-        button:disabled { opacity: .6; cursor: progress; }
-        label { font-size: 12px; color: #57606a; display: flex; gap: 4px; align-items: center; }
-        .opts { display: flex; gap: 12px; margin-bottom: 12px; font-size: 12px; }
+        label.row b { color: var(--paper); font-weight: 500; }
+        select {
+          flex: 1;
+          font: 400 12px/1 var(--mono);
+          color: var(--paper);
+          background: var(--panel-2);
+          border: 1px solid var(--rule);
+          padding: 5px 6px;
+          border-radius: 3px;
+          outline: none;
+        }
+        select:focus { border-color: var(--amber); }
+        .opts {
+          display: grid; grid-template-columns: 1fr;
+          gap: 6px;
+          font: 400 12px/1 var(--mono);
+          margin-bottom: 12px;
+        }
+        .opts label {
+          display: flex; gap: 8px; align-items: center;
+          color: var(--graphite);
+          cursor: pointer;
+          user-select: none;
+        }
+        .opts input[type=checkbox] {
+          appearance: none;
+          width: 12px; height: 12px;
+          background: var(--panel-2);
+          border: 1px solid var(--rule-2);
+          border-radius: 2px;
+          display: inline-grid; place-items: center;
+          cursor: pointer;
+        }
+        .opts input[type=checkbox]:checked {
+          background: var(--amber);
+          border-color: var(--amber);
+        }
+        .opts input[type=checkbox]:checked::after {
+          content: '';
+          width: 6px; height: 3px;
+          border-left: 2px solid var(--ink);
+          border-bottom: 2px solid var(--ink);
+          transform: translateY(-1px) rotate(-45deg);
+        }
+        .opts label:has(input:checked) { color: var(--paper); }
+
+        .actions {
+          display: grid; grid-template-columns: 1fr 1fr 1fr;
+          gap: 6px;
+          margin-bottom: 14px;
+        }
+        button.act {
+          font: 600 11px/1 var(--mono);
+          letter-spacing: 0.04em;
+          color: var(--ink);
+          border: 1px solid;
+          padding: 9px 4px;
+          cursor: pointer;
+          border-radius: 3px;
+          text-transform: uppercase;
+          transition: filter 80ms;
+        }
+        button.act:hover { filter: brightness(1.1); }
+        button.act:disabled { opacity: .4; cursor: progress; filter: none; }
+        button.act[data-kind=build]    { background: var(--amber); border-color: var(--amber); color: var(--ink); }
+        button.act[data-kind=check]    { background: var(--cyan); border-color: var(--cyan); color: var(--ink); }
+        button.act[data-kind=validate] { background: transparent; border-color: var(--rule-2); color: var(--graphite); }
+
+        .live {
+          font: 400 11px/1 var(--mono);
+          color: var(--cyan);
+          display: flex; align-items: center; gap: 6px;
+          margin-bottom: 8px;
+          height: 14px;
+        }
+        .live .dot {
+          width: 7px; height: 7px;
+          background: var(--cyan);
+          border-radius: 50%;
+          box-shadow: 0 0 6px var(--cyan);
+          animation: pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse { 50% { opacity: .3; } }
+        .live.off { color: var(--dim); }
+        .live.off .dot { background: var(--dim); box-shadow: none; animation: none; }
+
         .out {
-          margin-top: 12px;
-          font-size: 12px;
-          background: #f6f8fa;
-          border: 1px solid #d0d7de;
-          border-radius: 4px;
-          padding: 8px;
+          font: 400 11px/1.5 var(--mono);
+          background: var(--ink);
+          border: 1px solid var(--rule);
+          color: var(--paper);
+          padding: 8px 10px;
           white-space: pre-wrap;
           word-break: break-all;
-          max-height: 200px;
+          max-height: 180px;
           overflow: auto;
+          border-radius: 3px;
         }
-        .diag-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 240px; overflow: auto; }
+        .out .k { color: var(--graphite); }
+        .out .n { color: var(--cyan); font-variant-numeric: tabular-nums; }
+        .out .s { color: var(--amber); }
+        .out .e { color: var(--rose); }
+        .out .t { color: var(--dim); }
+
+        .diag-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 220px; overflow: auto; }
         .diag {
-          padding: 4px 6px; border-left: 3px solid #d0d7de;
-          margin-bottom: 2px; font-size: 12px; background: #f6f8fa;
+          padding: 6px 8px 6px 10px;
+          border-left: 3px solid var(--rule-2);
+          margin-bottom: 2px;
+          font: 400 11px/1.4 var(--mono);
+          background: var(--panel-2);
+          color: var(--paper);
+          display: flex; flex-direction: column; gap: 2px;
         }
-        .diag.error { border-color: #cf222e; }
-        .diag.warning { border-color: #9a6700; }
-        .diag .code { color: #57606a; font-family: ui-monospace, monospace; }
+        .diag.error { border-left-color: var(--rose); }
+        .diag.warning { border-left-color: var(--amber); }
+        .diag.note { border-left-color: var(--cyan); }
+        .diag .head { display: flex; gap: 8px; align-items: baseline; }
+        .diag .sev {
+          font-size: 9px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--graphite);
+        }
+        .diag.error .sev { color: var(--rose); }
+        .diag.warning .sev { color: var(--amber); }
+        .diag .code {
+          color: var(--cyan);
+        }
+        .diag .msg { color: var(--paper); }
+        .diag .where { color: var(--graphite); font-size: 10px; }
       </style>
-      <h3>构建</h3>
-      <div class="row">
-        <label>format
-          <select id="fmt">
-            <option value="json">json</option>
-            <option value="json-pretty" selected>json-pretty</option>
-            <option value="msgpack">msgpack</option>
-          </select>
-        </label>
-        <label>parser
-          <select id="parser"></select>
-        </label>
+
+      <div class="head">BUILD &amp; CHECK</div>
+
+      <div class="group">
+        <label class="row"><b>format</b></label>
+        <select id="fmt">
+          <option value="json">json</option>
+          <option value="json-pretty" selected>json-pretty</option>
+          <option value="msgpack">msgpack</option>
+        </select>
+      </div>
+      <div class="group">
+        <label class="row"><b>parser</b></label>
+        <select id="parser"></select>
       </div>
       <div class="opts">
         <label><input type="checkbox" id="pretty"> pretty</label>
         <label><input type="checkbox" id="includeFields"> include_fields</label>
         <label><input type="checkbox" id="write"> write to disk</label>
       </div>
-      <div class="row">
-        <button id="build">Build</button>
-        <button id="check" class="check">Check</button>
-        <button id="validate" class="validate">Validate</button>
+      <div class="actions">
+        <button class="act" data-kind="build" id="build">Build</button>
+        <button class="act" data-kind="check" id="check">Check</button>
+        <button class="act" data-kind="validate" id="validate">Validate</button>
       </div>
-      <div id="out" class="out">尚未运行。</div>
+      <div class="live off" id="live"><span class="dot"></span><span id="live-text">idle</span></div>
+      <div id="out" class="out"><span class="t">尚未运行。</span></div>
       <ul id="diag" class="diag-list"></ul>
     `;
     const parserSel = shadow.getElementById('parser');
@@ -436,6 +934,12 @@ class BuildPanel extends HTMLElement {
     this.refresh();
     const out = this.shadowRoot.getElementById('out');
     const diag = this.shadowRoot.getElementById('diag');
+    const live = this.shadowRoot.getElementById('live');
+    const liveText = this.shadowRoot.getElementById('live-text');
+    live.classList.remove('off');
+    liveText.textContent = `running · ${kind}`;
+    out.innerHTML = `<span class="t">⟶ ${kind}…</span>`;
+    diag.innerHTML = '';
     try {
       let url, body;
       if (kind === 'build') {
@@ -471,9 +975,7 @@ class BuildPanel extends HTMLElement {
       let payload;
       try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
       appState.lastResult = { kind, status: r.status, payload };
-      out.textContent = (kind === 'validate' && r.status === 501)
-        ? `${kind}: 501 Not Implemented\n${text}`
-        : `${kind}: HTTP ${r.status}\n${text}`;
+      out.innerHTML = renderResultLine(kind, r.status, payload);
       diag.innerHTML = '';
       const diags = payload.diagnostics || [];
       for (const d of diags) {
@@ -481,16 +983,24 @@ class BuildPanel extends HTMLElement {
         li.className = `diag ${(d.severity || 'Error').toLowerCase()}`;
         const loc = d.location || {};
         const where = [loc.file, loc.sheet, loc.line, loc.column].filter(Boolean).join(':');
-        li.innerHTML = `<div><span class="code">${escapeHtml(d.code || '')}</span> ${escapeHtml(d.message || '')}</div>
-                        <small>${escapeHtml(where)}</small>`;
+        li.innerHTML = `
+          <div class="head">
+            <span class="sev">${escapeHtml(d.severity || 'error')}</span>
+            <span class="code">${escapeHtml(d.code || '')}</span>
+          </div>
+          <div class="msg">${escapeHtml(d.message || '')}</div>
+          ${where ? `<div class="where">${escapeHtml(where)}</div>` : ''}
+        `;
         diag.appendChild(li);
       }
     } catch (e) {
       appState.lastResult = { kind, error: String(e) };
-      out.textContent = `error: ${e}`;
+      out.innerHTML = `<span class="e">✗ ${escapeHtml(String(e))}</span>`;
     } finally {
       appState.busy = false;
       this.refresh();
+      live.classList.add('off');
+      liveText.textContent = 'idle';
       bus.emit('app:result', appState.lastResult);
     }
   }
@@ -504,47 +1014,97 @@ class BuildPanel extends HTMLElement {
 }
 customElements.define('build-panel', BuildPanel);
 
-// -----------------------------------------------------------------------------
+function renderResultLine(kind, status, payload) {
+  if (kind === 'validate') {
+    return `<span class="k">${kind}</span> <span class="s">${status}</span> <span class="t">Not Implemented — 数据校验功能仍在研究中</span>`;
+  }
+  if (payload?.error) {
+    return `<span class="k">${kind}</span> <span class="e">✗ HTTP ${status}</span>\n<span class="t">${escapeHtml(payload.error)}</span>`;
+  }
+  const dur = payload?.duration_ms != null ? ` <span class="n">${payload.duration_ms}ms</span>` : '';
+  const nDiag = payload?.diagnostics?.length ?? 0;
+  const nErr = (payload?.diagnostics || []).filter(d => (d.severity || 'Error') === 'Error').length;
+  const nWarn = (payload?.diagnostics || []).filter(d => d.severity === 'Warning').length;
+  const bytes = payload?.bytes_written != null ? ` <span class="k">·</span> <span class="n">${payload.bytes_written}</span><span class="k">B</span>` : '';
+  const out = payload?.output_path ? ` <span class="k">→</span> <span class="s">${escapeHtml(payload.output_path)}</span>` : '';
+  return `<span class="k">${kind}</span> <span class="s">${status}</span>${dur}${bytes}${out}\n<span class="k">diagnostics</span> <span class="n">${nDiag}</span> <span class="k">(</span><span class="e">${nErr}</span> <span class="k">err ·</span> <span class="s">${nWarn}</span> <span class="k">warn)</span>`;
+}
+
+// =============================================================================
 // <status-bar>
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 class StatusBar extends HTMLElement {
   connectedCallback() {
     const shadow = this.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>
-        :host { display: flex; gap: 16px; align-items: center; font-size: 12px; }
+      <style>${TOKENS}
+        :host {
+          flex: 1;
+          display: flex; gap: 18px; align-items: center;
+          padding: 0 14px;
+          font: 400 11px/1 var(--mono);
+          color: var(--graphite);
+          letter-spacing: 0.04em;
+        }
+        .seg { display: flex; gap: 6px; align-items: center; }
+        .seg b { color: var(--paper); font-weight: 500; }
+        .seg .live-dot {
+          width: 6px; height: 6px;
+          background: var(--dim);
+          border-radius: 50%;
+        }
+        .seg.busy .live-dot { background: var(--cyan); box-shadow: 0 0 4px var(--cyan); animation: blink 1.2s ease-in-out infinite; }
+        @keyframes blink { 50% { opacity: .3; } }
+        .seg.ok .live-dot { background: var(--cyan); }
+        .seg.err .live-dot { background: var(--rose); }
+        .spacer { flex: 1; }
+        .right { color: var(--dim); }
       </style>
-      <span id="dir"></span>
-      <span id="busy"></span>
-      <span id="last"></span>
+      <span class="seg"><span class="live-dot"></span><span>dir</span><b id="dir">—</b></span>
+      <span class="seg"><span>sheets</span><b id="sheets">0</b></span>
+      <span class="seg" id="last-seg"><span>last</span><b id="last">—</b></span>
+      <span class="spacer"></span>
+      <span class="right">tablec · webui</span>
     `;
+    this.dirEl = shadow.getElementById('dir');
+    this.sheetsEl = shadow.getElementById('sheets');
+    this.lastEl = shadow.getElementById('last');
+    this.lastSeg = shadow.getElementById('last-seg');
     this.render();
     bus.on('app:state', () => this.render());
     bus.on('app:result', () => this.render());
+    bus.on('app:sheet', () => this.render());
   }
   render() {
-    this.shadowRoot.getElementById('dir').textContent =
-      `dir: ${appState.dir}`;
-    this.shadowRoot.getElementById('busy').textContent =
-      appState.busy ? 'busy…' : '';
+    this.dirEl.textContent = appState.dir;
+    this.sheetsEl.textContent = String(appState.sheets.length).padStart(2, '0');
     const last = appState.lastResult;
-    if (last) {
-      if (last.error) this.shadowRoot.getElementById('last').textContent = `error: ${last.error}`;
-      else if (last.status === 501) this.shadowRoot.getElementById('last').textContent = `validate: 501 (todo)`;
-      else if (last.payload?.duration_ms != null) this.shadowRoot.getElementById('last').textContent =
-        `${last.kind}: ${last.status} · ${last.payload.duration_ms}ms · ${last.payload.diagnostics?.length ?? 0} diags`;
-      else this.shadowRoot.getElementById('last').textContent = `${last.kind}: ${last.status}`;
+    this.lastSeg.classList.remove('busy', 'ok', 'err');
+    if (appState.busy) {
+      this.lastSeg.classList.add('busy');
+      this.lastEl.textContent = 'running…';
+    } else if (last) {
+      if (last.error) { this.lastSeg.classList.add('err'); this.lastEl.textContent = `error · ${truncErr(last.error)}`; }
+      else if (last.status === 501) { this.lastSeg.classList.add('err'); this.lastEl.textContent = 'validate · 501 todo'; }
+      else if (last.status >= 200 && last.status < 300) {
+        this.lastSeg.classList.add('ok');
+        const dur = last.payload?.duration_ms != null ? `${last.payload.duration_ms}ms` : `${last.status}`;
+        this.lastEl.textContent = `${last.kind} · ${dur}`;
+      } else {
+        this.lastSeg.classList.add('err');
+        this.lastEl.textContent = `${last.kind} · ${last.status}`;
+      }
     } else {
-      this.shadowRoot.getElementById('last').textContent = '';
+      this.lastEl.textContent = '—';
     }
   }
 }
 customElements.define('status-bar', StatusBar);
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // helpers
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 async function getJson(url) {
   const r = await fetch(url);
@@ -567,6 +1127,32 @@ async function refreshState() {
     appState.files = files;
     bus.emit('app:files', files);
   } catch (e) { console.error('files', e); }
+}
+
+function colLetter(idx) {
+  // 0 → A, 25 → Z, 26 → AA, 51 → AZ, 52 → BA (0-indexed spreadsheet cols)
+  let s = '';
+  let n = idx;
+  while (true) {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+    if (n < 0) break;
+  }
+  return s;
+}
+
+function extOf(name) {
+  const i = name.lastIndexOf('.');
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+}
+function baseName(p) {
+  if (!p) return '';
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+function truncErr(e) {
+  const s = String(e);
+  return s.length > 60 ? s.slice(0, 57) + '…' : s;
 }
 
 function escapeHtml(s) {
