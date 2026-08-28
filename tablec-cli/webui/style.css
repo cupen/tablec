@@ -1,5 +1,21 @@
-/* tablec webui — global styles only.
-   Per-component styles live inside each <x-*> element's Shadow DOM. */
+/* tablec webui — global styles. Per-component styles live in Shadow DOM. */
+
+:root {
+  /* The Cell palette */
+  --ink:     #0E1116;
+  --panel:   #161A21;
+  --rule:    #22272F;
+  --rule-2:  #2A3140;
+  --paper:   #E6EAF2;
+  --graphite:#7A8497;
+  --amber:   #F5C242;
+  --cyan:    #5DD3C4;
+  --rose:    #E06C75;
+
+  /* Typography */
+  --mono:    ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+  --sans:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
 
 * { box-sizing: border-box; }
 
@@ -7,10 +23,36 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
-        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  color: #1f2328;
-  background: #f6f8fa;
+  font: 13px/1.45 var(--sans);
+  color: var(--paper);
+  background: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+a { color: var(--cyan); text-decoration: none; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection { background: var(--amber); color: var(--ink); }
+
+/* Scrollbars — keep them dark & quiet */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-2) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
 app-shell { display: block; height: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
