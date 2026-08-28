@@ -1,20 +1,38 @@
-/* tablec webui — global styles. Per-component styles live in Shadow DOM. */
+/* tablec webui — global tokens + reset only. All component styles live in
+   each Lit element's `static styles`. CSS custom properties defined on
+   `:root` cross shadow DOM boundaries, so components reference them
+   directly via `var(--ink)` etc. */
 
 :root {
-  /* The Cell palette */
-  --ink:     #0E1116;
-  --panel:   #161A21;
-  --rule:    #22272F;
-  --rule-2:  #2A3140;
-  --paper:   #E6EAF2;
-  --graphite:#7A8497;
+  /* Palette — "Lab Notebook" dark, with restrained amber + cyan accents. */
+  --ink:     #0D0F14;
+  --panel:   #14171E;
+  --panel-2: #1A1F28;
+  --rule:    #1F242E;
+  --rule-2: #2A313D;
+  --paper:   #E8ECF2;
+  --graphite:#6E7689;
+  --dim:     #4A5266;
   --amber:   #F5C242;
+  --amber-soft: rgba(245, 194, 66, 0.08);
+  --amber-glow: rgba(245, 194, 66, 0.16);
   --cyan:    #5DD3C4;
+  --cyan-soft: rgba(93, 211, 196, 0.08);
   --rose:    #E06C75;
+  --jade:    #7FB069;
 
-  /* Typography */
+  /* Typography — system stacks only; no web fonts. */
   --mono:    ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
   --sans:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --serif:   ui-serif, Georgia, 'Times New Roman', serif;
+
+  /* Scale (used by individual components) */
+  --t-10: 10px;
+  --t-11: 11px;
+  --t-12: 12px;
+  --t-13: 13px;
+  --t-15: 15px;
+  --t-18: 18px;
 }
 
 * { box-sizing: border-box; }
@@ -23,7 +41,7 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font: 13px/1.45 var(--sans);
+  font: var(--t-13)/1.45 var(--sans);
   color: var(--paper);
   background: var(--ink);
   -webkit-font-smoothing: antialiased;
