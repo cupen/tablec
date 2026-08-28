@@ -919,6 +919,9 @@ mod tests {
         // Sanity-check that the vendored Lit bundle really is Lit 3 with the
         // export shape we rely on (LitElement + lit-html).
         assert!(s.contains("LitElement") || s.contains("lit-element"), "vendored file missing Lit");
+        // Pin to the latest Lit 3 minor we vendored — catches accidental
+        // bundle downgrades on rebuild.
+        assert!(s.contains("3.3.3"), "vendored Lit version is not 3.3.3");
     }
 
     // -------------------------------------------------------------------------
