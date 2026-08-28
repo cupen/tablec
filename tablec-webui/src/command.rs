@@ -1,13 +1,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clap::Args;
+use clap::Parser;
 
-use crate::web::{self, WebuiState};
+use crate::router;
+use crate::WebuiState;
 
 /// Launch the local webui: an HTTP server that serves a single-page
 /// Web Components UI for previewing, building and checking table files.
-#[derive(Args, Debug)]
+#[derive(Parser, Debug)]
+#[command(name = "webui", about = "Launch local webui for previewing, building and checking tables")]
 pub struct WebuiCommand {
     /// Directory to preview/build. Defaults to the current working directory.
     #[arg(long, short = 'd')]
@@ -48,7 +50,7 @@ impl WebuiCommand {
         let dir = dir.canonicalize().unwrap_or(dir);
 
         // Build parser registry. Plugin paths come only from CLI flags — never from HTTP input.
-        let registry = web::build_registry(&self.plugin_path)?;
+        let registry = router::build_registry(&self.plugin_path)?;
         let parser_name = self.parser.clone();
         let config_override = self.config.clone();
 
@@ -59,7 +61,7 @@ impl WebuiCommand {
             config_override,
         ));
 
-        let app = web::router(state.clone());
+        let app = router::router(state.clone());
 
         let host = self.host.clone();
         let port = self.port;
@@ -120,54 +122,25 @@ mod tests {
     fn webui_command_parses_minimal() {
         // clap derive smoke test: the long flags must parse even when only a
         // bare `webui` is given (everything is optional / defaulted).
-        use clap::Parser;
-        #[derive(Parser)]
-        struct Wrap {
-            #[command(subcommand)]
-            cmd: crate::cli::Command,
-        }
-        let parsed = Wrap::parse_from(["tablec", "webui"]).cmd;
-        match parsed {
-            crate::cli::Command::Webui(w) => {
-                assert!(w.dir.is_none());
-                assert_eq!(w.host, "127.0.0.1");
-                assert_eq!(w.port, 9527);
-                assert!(!w.no_browser);
-                assert!(w.config.is_none());
-                assert!(w.parser.is_none());
-                assert!(w.plugin_path.is_empty());
-            }
-            _ => panic!("expected Webui variant"),
-        }
+        let w = WebuiCommand::parse_from(["webui"]);
+        assert!(w.dir.is_none());
+        assert_eq!(w.host, "127.0.0.1");
+        assert_eq!(w.port, 9527);
+        assert!(!w.no_browser);
+        assert!(w.config.is_none());
+        assert!(w.parser.is_none());
+        assert!(w.plugin_path.is_empty());
     }
 
     #[test]
     fn webui_command_parses_short_port_flag() {
-        use clap::Parser;
-        #[derive(Parser)]
-        struct Wrap {
-            #[command(subcommand)]
-            cmd: crate::cli::Command,
-        }
-        let parsed = Wrap::parse_from(["tablec", "webui", "-p", "8080"]).cmd;
-        match parsed {
-            crate::cli::Command::Webui(w) => {
-                assert_eq!(w.port, 8080);
-            }
-            _ => panic!("expected Webui variant"),
-        }
+        let w = WebuiCommand::parse_from(["webui", "-p", "8080"]);
+        assert_eq!(w.port, 8080);
     }
 
     #[test]
     fn webui_command_parses_full() {
-        use clap::Parser;
-        #[derive(Parser)]
-        struct Wrap {
-            #[command(subcommand)]
-            cmd: crate::cli::Command,
-        }
-        let parsed = Wrap::parse_from([
-            "tablec",
+        let w = WebuiCommand::parse_from([
             "webui",
             "--dir",
             "./data",
@@ -182,19 +155,13 @@ mod tests {
             "standard",
             "--plugin-path",
             "/tmp/libfoo.so",
-        ])
-        .cmd;
-        match parsed {
-            crate::cli::Command::Webui(w) => {
-                assert_eq!(w.dir, Some(PathBuf::from("./data")));
-                assert_eq!(w.host, "0.0.0.0");
-                assert_eq!(w.port, 8080);
-                assert!(w.no_browser);
-                assert_eq!(w.config, Some(PathBuf::from("./tablec.toml")));
-                assert_eq!(w.parser, Some("standard".to_string()));
-                assert_eq!(w.plugin_path, vec![PathBuf::from("/tmp/libfoo.so")]);
-            }
-            _ => panic!("expected Webui variant"),
-        }
+        ]);
+        assert_eq!(w.dir, Some(PathBuf::from("./data")));
+        assert_eq!(w.host, "0.0.0.0");
+        assert_eq!(w.port, 8080);
+        assert!(w.no_browser);
+        assert_eq!(w.config, Some(PathBuf::from("./tablec.toml")));
+        assert_eq!(w.parser, Some("standard".to_string()));
+        assert_eq!(w.plugin_path, vec![PathBuf::from("/tmp/libfoo.so")]);
     }
 }

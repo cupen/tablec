@@ -1,21 +1,17 @@
 //! webui backend: shared state, HTTP handlers, and calamine-based excel reader.
 //!
-//! The actual `WebuiCommand` lives in [`crate::cmd::webui`]. This module is the
-//! library half of the split — it only depends on `axum` + `tablec-core`, so
-//! unit tests can drive the router via `tower::ServiceExt::oneshot` without
-//! spawning a server.
-
-pub mod excel;
-pub mod handlers;
-pub mod state;
-
-pub use state::WebuiState;
+//! The actual [`WebuiCommand`] lives in [`crate::command`]. This module only
+//! depends on `axum` + `tablec-core`, so unit tests can drive the router via
+//! `tower::ServiceExt::oneshot` without spawning a server.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::{get, post};
+
+use crate::WebuiState;
+use crate::handlers;
 
 /// Build a [`SchemaParserRegistry`] from `plugin_paths`. Returns a
 /// `DynamicPluginError`-flavored [`String`] error so callers don't have to

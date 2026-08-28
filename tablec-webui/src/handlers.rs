@@ -2,7 +2,7 @@
 //!
 //! All endpoints accept `Arc<WebuiState>` via axum's `State` extractor and
 //! return either `Json<T>` or [`ApiError`]. Static assets are served from
-//! `tablec-cli/webui/` via `include_str!` so the binary stays self-contained.
+//! `tablec-webui/webui/` via `include_str!` so the binary stays self-contained.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,17 +21,17 @@ use tablec_core::core::project::project::Project;
 use tablec_core::core::table::constraint::ConstraintValidator;
 use tablec_core::export::{Format, Json as JsonFmt, Msgpack};
 
-use crate::web::excel::{self, Grid, SheetInfo};
-use crate::web::state::WebuiState;
+use crate::excel::{self, Grid, SheetInfo};
+use crate::state::WebuiState;
 
 // -----------------------------------------------------------------------------
 // Static asset payloads (embedded at compile time).
 // -----------------------------------------------------------------------------
 
-const INDEX_HTML: &str = include_str!("../../webui/index.html");
-const APP_JS: &str = include_str!("../../webui/app.js");
-const STYLE_CSS: &str = include_str!("../../webui/style.css");
-const VENDOR_LIT: &str = include_str!("../../webui/vendor/lit.js");
+const INDEX_HTML: &str = include_str!("../webui/index.html");
+const APP_JS: &str = include_str!("../webui/app.js");
+const STYLE_CSS: &str = include_str!("../webui/style.css");
+const VENDOR_LIT: &str = include_str!("../webui/vendor/lit.js");
 
 pub async fn index_html() -> Response {
     html_response(INDEX_HTML)
@@ -687,7 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_returns_ok() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -706,7 +706,7 @@ mod tests {
 
     #[tokio::test]
     async fn index_html_returns_html() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
@@ -731,7 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn validate_returns_501() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let req = Request::builder()
             .method("POST")
             .uri("/api/validate")
@@ -753,7 +753,7 @@ mod tests {
             eprintln!("skipping: fixture dir {} not present", dir.display());
             return;
         }
-        let app = crate::web::router(make_state(dir.clone()));
+        let app = crate::router::router(make_state(dir.clone()));
         let url = format!(
             "/api/files?dir={}",
             urlencoding::encode(&dir.display().to_string())
@@ -784,7 +784,7 @@ mod tests {
         }
         let sheets = excel::list_sheets(&p).unwrap();
         let target = sheets.first().unwrap().name.clone();
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let url = format!(
             "/api/preview?path={}&sheet={}&max_rows=20",
             urlencoding::encode(&p.display().to_string()),
@@ -819,7 +819,7 @@ mod tests {
             eprintln!("skipping: fixture dir {} not present", dir.display());
             return;
         }
-        let app = crate::web::router(make_state(dir.clone()));
+        let app = crate::router::router(make_state(dir.clone()));
         let body = serde_json::json!({ "dir": dir.display().to_string() }).to_string();
         let req = Request::builder()
             .method("POST")
@@ -844,7 +844,7 @@ mod tests {
 
     #[tokio::test]
     async fn static_app_js_returns_javascript_content_type() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -869,7 +869,7 @@ mod tests {
 
     #[tokio::test]
     async fn static_style_css_returns_css_content_type() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -891,7 +891,7 @@ mod tests {
 
     #[tokio::test]
     async fn static_vendor_lit_returns_javascript_content_type() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -932,7 +932,7 @@ mod tests {
     async fn state_returns_expected_fields() {
         let dir = std::path::PathBuf::from("/tmp/webui_smoke_state_test");
         std::fs::create_dir_all(&dir).ok();
-        let app = crate::web::router(make_state(dir.clone()));
+        let app = crate::router::router(make_state(dir.clone()));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -965,7 +965,7 @@ mod tests {
 
     #[tokio::test]
     async fn files_404_when_dir_missing() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let url = "/api/files?dir=%2Fno%2Fsuch%2Fdir%2Fsomewhere%2Fzzz";
         let resp = app
             .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
@@ -988,7 +988,7 @@ mod tests {
             eprintln!("skipping: fixture dir {} not present", dir.display());
             return;
         }
-        let app = crate::web::router(make_state(dir.clone()));
+        let app = crate::router::router(make_state(dir.clone()));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[tokio::test]
     async fn sheets_404_when_path_missing() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let url = "/api/sheets?path=%2Fno%2Fsuch%2Ffile.xlsx";
         let resp = app
             .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
@@ -1028,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn preview_404_when_path_missing() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let url = "/api/preview?path=%2Fno%2Fsuch.xlsx&sheet=Items";
         let resp = app
             .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
@@ -1044,7 +1044,7 @@ mod tests {
             eprintln!("skipping: fixture {} not present", p.display());
             return;
         }
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let url = format!(
             "/api/preview?path={}&sheet=does-not-exist",
             urlencoding::encode(&p.display().to_string()),
@@ -1095,7 +1095,7 @@ output_dir = "out"
 "#,
         )
         .unwrap();
-        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
         let body = serde_json::json!({
             "dir": tmp.path().display().to_string(),
             "format": "json-pretty",
@@ -1140,7 +1140,7 @@ output_dir = "out"
 "#,
         )
         .unwrap();
-        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
         let body = serde_json::json!({
             "dir": tmp.path().display().to_string(),
             "format": "json",
@@ -1170,7 +1170,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn build_rejects_unknown_format() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let body = serde_json::json!({
             "dir": ".",
             "format": "protobuf",
@@ -1195,7 +1195,7 @@ output_dir = "out"
     async fn build_rejects_plugin_paths_from_http() {
         // plugin_paths from HTTP must be rejected with 400 — only the CLI
         // flag is trusted. This is the security boundary for cdylib loading.
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let body = serde_json::json!({
             "dir": ".",
             "format": "json",
@@ -1223,7 +1223,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn build_rejects_missing_dir() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let body = serde_json::json!({
             "dir": "/no/such/dir/zzz",
             "format": "json",
@@ -1245,7 +1245,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn check_404_when_dir_missing() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let body = serde_json::json!({ "dir": "/no/such/dir/zzz" }).to_string();
         let req = Request::builder()
             .method("POST")
@@ -1259,7 +1259,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn check_rejects_plugin_paths_from_http() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let body = serde_json::json!({
             "dir": ".",
             "plugin_paths": ["/tmp/evil.so"],
@@ -1294,7 +1294,7 @@ output_dir = "out"
 "#,
         )
         .unwrap();
-        let app = crate::web::router(make_state(tmp.path().to_path_buf()));
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
         let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
         let req = Request::builder()
             .method("POST")
@@ -1318,7 +1318,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn validate_501_body_has_todo_field() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let req = Request::builder()
             .method("POST")
             .uri("/api/validate")
@@ -1342,7 +1342,7 @@ output_dir = "out"
 
     #[tokio::test]
     async fn unknown_route_returns_404() {
-        let app = crate::web::router(make_state(std::path::PathBuf::from(".")));
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()

@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 pub use crate::cmd::build::BuildCommand;
 pub use crate::cmd::check::CheckCommand;
 pub use crate::cmd::example::ExampleCommand;
-pub use crate::cmd::webui::WebuiCommand;
+pub use tablec_webui::command::WebuiCommand;
 
 #[derive(Debug, Parser)]
 #[command(
