@@ -9,8 +9,11 @@
 // updates, declarative templates. We get cleaner code than vanilla
 // `attachShadow` + manual `render()`.
 //
-// Aesthetic: "Lab Notebook" — dark + quiet + amber/cyan. Signature
-// element is the cell-coordinate formula bar that reads `[B2] ▸ alice`.
+// Visual system: dark "Inkwell" / light "Blueprint" via [data-theme].
+// Components reference tokens by role (--bg / --surface / --accent),
+// so theme flips just by setting an attribute on <html> — no per-
+// component JS re-render needed. Only the theme-toggle button re-
+// renders to swap sun/moon icon.
 
 import { LitElement, html, css } from '/static/vendor/lit.js';
 
@@ -49,6 +52,35 @@ class StoreSub {
   }
   hostDisconnected() {
     bus.removeEventListener('change', this._onChange);
+  }
+}
+
+// =============================================================================
+// theme controller — flips [data-theme] on <html>, persists to localStorage.
+// Components don't need to re-render on theme change (CSS vars flip), but the
+// toggle button does to swap sun/moon icons.
+// =============================================================================
+
+const THEME_KEY = 'tablec-theme';
+
+class ThemeCtrl {
+  constructor(host) {
+    host.addController(this);
+    this.host = host;
+    this.theme = 'dark';
+  }
+  hostConnected() {
+    let stored = null;
+    try { stored = localStorage.getItem(THEME_KEY); } catch { /* private mode */ }
+    if (stored !== 'dark' && stored !== 'light') stored = 'dark';
+    this.theme = stored;
+    document.documentElement.setAttribute('data-theme', this.theme);
+  }
+  toggle() {
+    this.theme = this.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', this.theme);
+    try { localStorage.setItem(THEME_KEY, this.theme); } catch { /* ignore */ }
+    this.host.requestUpdate();
   }
 }
 
@@ -120,6 +152,23 @@ function cellClass(cell) {
 }
 
 // =============================================================================
+// icons — inline SVG, themed via currentColor
+// =============================================================================
+
+const SUN_ICON = html`
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l1.41-1.41M17.66 6.34l1.41-1.41"/>
+  </svg>`;
+
+const MOON_ICON = html`
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>`;
+
+// =============================================================================
 // <app-shell> — top-level layout
 // =============================================================================
 
@@ -129,21 +178,22 @@ class AppShell extends LitElement {
       display: grid;
       grid-template-rows: auto 1fr 24px;
       height: 100%;
-      background: var(--ink);
-      color: var(--paper);
+      background: var(--bg);
+      color: var(--text);
       font: var(--t-13)/1.45 var(--sans);
     }
     header {
-      display: flex; align-items: center; gap: 18px;
-      padding: 10px 18px;
-      background: linear-gradient(180deg, #181C25 0%, var(--panel) 100%);
+      display: flex; align-items: center; gap: 16px;
+      padding: 10px 16px;
+      background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
       border-bottom: 1px solid var(--rule);
+      box-shadow: var(--shadow-1);
     }
     .brand {
       display: flex; align-items: center; gap: 9px;
       font: 600 14px/1 var(--serif);
       letter-spacing: 0.01em;
-      color: var(--paper);
+      color: var(--text);
     }
     .brand .mark {
       display: inline-grid;
@@ -152,18 +202,18 @@ class AppShell extends LitElement {
       gap: 1px;
       transition: filter 200ms ease;
     }
-    .brand:hover .mark { filter: drop-shadow(0 0 4px var(--amber-soft)); }
+    .brand:hover .mark { filter: drop-shadow(0 0 4px var(--accent-soft)); }
     .brand .mark i {
       background: var(--rule-2);
       display: block;
       border-radius: 1px;
     }
-    .brand .mark i:nth-child(1) { background: var(--amber); }
-    .brand .mark i:nth-child(3) { background: var(--cyan); }
-    .brand .mark i:nth-child(5) { background: var(--paper); }
+    .brand .mark i:nth-child(1) { background: var(--accent); }
+    .brand .mark i:nth-child(3) { background: var(--accent-2); }
+    .brand .mark i:nth-child(5) { background: var(--text); }
     .brand .ver {
       font: 400 9px/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       padding: 2px 5px;
       border: 1px solid var(--rule-2);
       border-radius: 2px;
@@ -173,29 +223,50 @@ class AppShell extends LitElement {
     .spacer { flex: 1; }
     .meta {
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       display: flex; gap: 14px;
       letter-spacing: 0.04em;
     }
-    .meta b { color: var(--paper); font-weight: 500; }
+    .meta b { color: var(--text); font-weight: 500; }
+    .theme-toggle {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px;
+      background: transparent;
+      color: var(--text-2);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+    }
+    .theme-toggle:hover {
+      background: var(--surface-2);
+      color: var(--accent);
+      border-color: var(--rule-2);
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
     main {
       display: grid;
-      grid-template-columns: 264px 1fr 340px;
-      background: var(--rule);
+      grid-template-columns: 280px 1fr 340px;
+      background: var(--rule);   /* gap color */
       gap: 1px;
       overflow: hidden;
     }
-    main > * { background: var(--panel); overflow: auto; min-width: 0; }
+    main > * { background: var(--surface); overflow: auto; min-width: 0; }
     footer {
-      background: var(--panel);
+      background: var(--surface);
       border-top: 1px solid var(--rule);
       display: flex; align-items: center;
     }
   `;
   _store = new StoreSub(this);
+  _theme = new ThemeCtrl(this);
 
   render() {
     const s = store;
+    const dark = this._theme.theme === 'dark';
     return html`
       <header>
         <span class="brand">
@@ -209,6 +280,14 @@ class AppShell extends LitElement {
           <span>parser <b>${s.activeParser}</b></span>
           <span>cfg <b>${s.configPath ?? '(default)'}</b></span>
         </span>
+        <button
+          class="theme-toggle"
+          @click=${() => this._theme.toggle()}
+          title=${dark ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label="Toggle theme"
+        >
+          ${dark ? SUN_ICON : MOON_ICON}
+        </button>
       </header>
       <main>
         <file-list></file-list>
@@ -221,7 +300,7 @@ class AppShell extends LitElement {
 
   firstUpdated() {
     refreshState();
-    // Global keyboard shortcuts: ⌘B build · ⌘C check · ⌘R reload.
+    // Global keyboard shortcuts: ⌘B build · ⌘C check · ⌘R reload · ⌘T theme.
     window.addEventListener('keydown', this._onKey);
   }
 
@@ -237,6 +316,7 @@ class AppShell extends LitElement {
     if (e.key === 'b') { e.preventDefault(); document.querySelector('build-panel')?.runAction('build'); }
     else if (e.key === 'c') { e.preventDefault(); document.querySelector('build-panel')?.runAction('check'); }
     else if (e.key === 'r') { e.preventDefault(); refreshState(); }
+    else if (e.key === 't') { e.preventDefault(); this._theme.toggle(); }
   };
 }
 customElements.define('app-shell', AppShell);
@@ -247,12 +327,12 @@ customElements.define('app-shell', AppShell);
 
 class DirPicker extends LitElement {
   static styles = css`
-    :host { display: flex; gap: 0; align-items: center; flex: 1; max-width: 620px; }
+    :host { display: flex; gap: 0; align-items: center; flex: 1; max-width: 640px; }
     .prefix {
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--graphite);
-      padding: 6px 8px;
-      background: var(--panel-2);
+      color: var(--text-2);
+      padding: 6px 9px;
+      background: var(--surface-2);
       border: 1px solid var(--rule);
       border-right: none;
       border-radius: 4px 0 0 4px;
@@ -260,19 +340,23 @@ class DirPicker extends LitElement {
     input {
       flex: 1; min-width: 0;
       font: 400 var(--t-12)/1 var(--mono);
-      color: var(--paper);
-      background: var(--panel-2);
+      color: var(--text);
+      background: var(--surface-2);
       border: 1px solid var(--rule);
       border-left: none;
       padding: 6px 10px;
       outline: none;
       border-radius: 0;
+      transition: border-color 100ms ease, box-shadow 100ms ease;
     }
-    input:focus { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-soft); }
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-glow);
+    }
     button {
       font: 500 var(--t-11)/1 var(--mono);
-      color: var(--paper);
-      background: var(--panel-2);
+      color: var(--text);
+      background: var(--surface-2);
       border: 1px solid var(--rule);
       padding: 6px 12px;
       cursor: pointer;
@@ -281,11 +365,12 @@ class DirPicker extends LitElement {
       transition: background 100ms ease, border-color 100ms ease;
     }
     button:hover { background: var(--rule); border-color: var(--rule-2); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     button.go {
-      background: var(--amber);
-      color: var(--ink);
-      border-color: var(--amber);
-      border-left: 1px solid var(--amber);
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      border-left: 1px solid var(--accent);
       font-weight: 600;
       border-radius: 0 4px 4px 0;
     }
@@ -332,75 +417,123 @@ class FileList extends LitElement {
     .head {
       position: sticky; top: 0; z-index: 2;
       padding: 12px 16px 10px;
-      background: linear-gradient(180deg, var(--panel) 0%, var(--panel) 70%, transparent 100%);
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface) 70%, transparent 100%);
       border-bottom: 1px solid var(--rule);
       font: 500 10px/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      display: flex; justify-content: space-between; align-items: baseline;
+      display: flex; align-items: center; gap: 9px;
     }
-    .head .count { color: var(--paper); font-weight: 600; }
+    .head .dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--accent-2);
+      border-radius: 1px;
+    }
+    .head .count {
+      margin-left: auto;
+      color: var(--text);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
     ul { list-style: none; padding: 0; margin: 0; }
     li {
-      padding: 10px 16px 10px 17px;
+      padding: 10px 16px 10px 14px;
       cursor: pointer;
       border-bottom: 1px solid var(--rule);
       border-left: 2px solid transparent;
       display: flex; flex-direction: column; gap: 4px;
       transition: background 100ms ease, border-color 100ms ease;
     }
-    li:hover { background: var(--panel-2); }
+    li:hover { background: var(--surface-2); }
     li.selected {
-      background: var(--panel-2);
-      border-left-color: var(--amber);
+      background: var(--surface-2);
+      border-left-color: var(--accent);
     }
     .name {
       font: 500 var(--t-13)/1.2 var(--sans);
-      color: var(--paper);
+      color: var(--text);
       display: flex; align-items: center; gap: 7px;
     }
     .name .ext {
       font: 500 9px/1 var(--mono);
-      color: var(--cyan);
+      color: var(--accent-2);
       padding: 2px 5px;
-      background: var(--cyan-soft);
-      border: 1px solid rgba(93, 211, 196, 0.2);
+      background: var(--accent-2-soft);
+      border: 1px solid var(--rule-2);
       border-radius: 2px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
     .meta {
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       letter-spacing: 0.02em;
     }
     .empty {
-      padding: 24px 16px;
-      color: var(--graphite);
+      padding: 22px 16px;
+      color: var(--text-2);
       font: 400 var(--t-12)/1.55 var(--sans);
+      border-left: 2px solid var(--rule);
+      margin: 4px 0;
+    }
+    .empty h3 {
+      margin: 0 0 8px;
+      font: 500 var(--t-13)/1.3 var(--serif);
+      color: var(--text);
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .empty p {
+      margin: 0 0 12px;
+    }
+    .empty .step {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 3px 0;
+      color: var(--text-2);
+    }
+    .empty .step b {
+      font: 500 var(--t-11)/1 var(--mono);
+      color: var(--accent-2);
+      width: 14px;
+      flex-shrink: 0;
+      letter-spacing: 0.04em;
     }
     .empty code {
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--paper);
-      background: var(--panel-2);
+      color: var(--text);
+      background: var(--surface-2);
       padding: 1px 5px;
       border-radius: 2px;
+    }
+    .empty .hint {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      font: 400 var(--t-11)/1.5 var(--mono);
+      color: var(--text-3);
+      letter-spacing: 0.02em;
     }
   `;
   _store = new StoreSub(this);
 
   render() {
-    const { files, selectedPath } = store;
+    const { files, selectedPath, dir } = store;
     return html`
       <div class="head">
+        <span class="dot" aria-hidden="true"></span>
         <span>FILES</span>
         <span class="count">${String(files.length).padStart(2, '0')}</span>
       </div>
       ${files.length === 0
         ? html`<div class="empty">
-            该目录下没有可识别的数据文件。<br />
-            支持 <code>.xlsx</code> <code>.xls</code> <code>.xlsb</code> <code>.ods</code>
+            <h3>No tables in this directory.</h3>
+            <p>Point the bar above at a folder that holds your <code>.xlsx</code> / <code>.xls</code> / <code>.xlsb</code> / <code>.ods</code> files.</p>
+            <div class="step"><b>1.</b><span>Type a path above and press 打开</span></div>
+            <div class="step"><b>2.</b><span>Files appear here as they're scanned</span></div>
+            <div class="step"><b>3.</b><span>Click one to preview and build</span></div>
+            <div class="hint">Currently scanning: <code>${dir || '.'}</code></div>
           </div>`
         : html`<ul>${files.map((f) => html`
             <li
@@ -440,7 +573,7 @@ class FilePreview extends LitElement {
     :host {
       display: flex; flex-direction: column;
       height: 100%; min-height: 0;
-      background: var(--panel);
+      background: var(--surface);
     }
 
     /* ---- formula bar (signature) ---- */
@@ -449,13 +582,13 @@ class FilePreview extends LitElement {
       grid-template-columns: 72px 1fr;
       align-items: stretch;
       border-bottom: 1px solid var(--rule);
-      background: var(--panel-2);
+      background: var(--surface-2);
       font-family: var(--mono);
     }
     .formula .coord {
       font: 600 var(--t-12)/1 var(--mono);
-      color: var(--ink);
-      background: var(--amber);
+      color: var(--bg);
+      background: var(--accent);
       padding: 10px 12px;
       letter-spacing: 0.05em;
       display: flex; align-items: center; justify-content: center;
@@ -463,39 +596,39 @@ class FilePreview extends LitElement {
     }
     .formula .coord.muted {
       background: transparent;
-      color: var(--dim);
+      color: var(--text-3);
       border-right: 1px solid var(--rule);
     }
     .formula .fn {
       display: flex; align-items: center; gap: 10px;
       padding: 0 14px;
       font: 400 var(--t-12)/1.4 var(--mono);
-      color: var(--paper);
+      color: var(--text);
       overflow: hidden;
       min-width: 0;
     }
     .formula .fn .src {
-      color: var(--graphite);
+      color: var(--text-2);
       font-size: var(--t-11);
       flex-shrink: 0;
       max-width: 50%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .formula .fn .sep { color: var(--graphite); }
+    .formula .fn .sep { color: var(--text-2); }
     .formula .fn .val {
-      color: var(--paper);
+      color: var(--text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       font-variant-numeric: tabular-nums;
     }
-    .formula .fn .val.num { color: var(--cyan); }
-    .formula .fn .val.bool { color: var(--amber); }
-    .formula .fn .val.empty { color: var(--dim); font-style: italic; }
+    .formula .fn .val.num { color: var(--accent-2); }
+    .formula .fn .val.bool { color: var(--accent); }
+    .formula .fn .val.empty { color: var(--text-3); font-style: italic; }
 
     /* ---- tabs (pill row) ---- */
     .tabs {
       display: flex; gap: 2px;
       padding: 8px 14px;
-      background: var(--panel-2);
+      background: var(--surface-2);
       border-bottom: 1px solid var(--rule);
       overflow-x: auto;
       scrollbar-width: none;
@@ -505,37 +638,37 @@ class FilePreview extends LitElement {
       padding: 6px 12px;
       cursor: pointer;
       font: 500 var(--t-12)/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       border-radius: 4px;
       transition: background 100ms, color 100ms;
       white-space: nowrap;
       display: flex; align-items: baseline; gap: 6px;
     }
-    .tab:hover { color: var(--paper); background: rgba(232, 236, 242, 0.04); }
+    .tab:hover { color: var(--text); background: var(--accent-soft); }
     .tab.active {
-      color: var(--ink);
-      background: var(--paper);
+      color: var(--bg);
+      background: var(--text);
       font-weight: 600;
     }
     .tab .size {
       font-size: 9px;
-      color: var(--dim);
+      color: var(--text-3);
       letter-spacing: 0.04em;
       font-weight: 400;
     }
-    .tab.active .size { color: var(--graphite); }
+    .tab.active .size { color: var(--text-2); }
 
     /* ---- spreadsheet grid ---- */
     .body {
       flex: 1; min-height: 0;
       overflow: auto;
-      background: var(--ink);
+      background: var(--surface-2);
       position: relative;
     }
     table.grid {
       border-collapse: collapse;
       font: 400 var(--t-12)/1.35 var(--mono);
-      color: var(--paper);
+      color: var(--text);
       font-variant-numeric: tabular-nums;
     }
     table.grid th, table.grid td {
@@ -549,8 +682,8 @@ class FilePreview extends LitElement {
       text-overflow: ellipsis;
     }
     table.grid th {
-      background: var(--panel-2);
-      color: var(--graphite);
+      background: var(--surface);
+      color: var(--text-2);
       font-weight: 500;
       position: sticky;
       z-index: 1;
@@ -563,35 +696,96 @@ class FilePreview extends LitElement {
       left: 0;
       z-index: 2;
       text-align: right;
-      color: var(--graphite);
+      color: var(--text-2);
       min-width: 44px;
-      background: var(--panel-2);
+      background: var(--surface);
     }
-    table.grid th.corner { z-index: 4; background: var(--panel-2); color: var(--dim); }
+    table.grid th.corner { z-index: 4; background: var(--surface); color: var(--text-3); }
     table.grid td.cell { cursor: cell; transition: background 60ms; }
-    table.grid td.cell:hover { background: var(--amber-soft); }
+    table.grid td.cell:hover { background: var(--accent-soft); }
     table.grid td.selected {
-      background: var(--amber-soft);
-      outline: 1.5px solid var(--amber);
+      background: var(--accent-soft);
+      outline: 1.5px solid var(--accent);
       outline-offset: -1.5px;
-      color: var(--paper);
+      color: var(--text);
     }
-    table.grid td.schema { color: var(--graphite); font-style: italic; }
-    table.grid td.schema.col-name { color: var(--cyan); font-style: normal; font-weight: 500; }
-    table.grid td.num { text-align: right; color: var(--cyan); }
-    table.grid td.bool { color: var(--amber); text-align: center; }
-    table.grid td.null { color: var(--dim); text-align: center; }
+    table.grid td.schema { color: var(--text-2); font-style: italic; }
+    table.grid td.schema.col-name { color: var(--accent-2); font-style: normal; font-weight: 500; }
+    table.grid td.num { text-align: right; color: var(--accent-2); }
+    table.grid td.bool { color: var(--accent); text-align: center; }
+    table.grid td.null { color: var(--text-3); text-align: center; }
 
+    /* ---- empty / hero state (signature amber rule) ---- */
     .empty {
-      padding: 32px;
-      color: var(--graphite);
+      position: relative;
+      padding: 28px 28px 28px 32px;
+      margin: 24px;
+      max-width: 460px;
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      color: var(--text-2);
       font: 400 var(--t-13)/1.6 var(--sans);
-      max-width: 400px;
+      box-shadow: var(--shadow-2);
+    }
+    .empty::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: var(--accent);
+      border-radius: 6px 0 0 6px;
+    }
+    .empty h3 {
+      margin: 0 0 6px;
+      font: 500 var(--t-15)/1.3 var(--serif);
+      color: var(--text);
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .empty p {
+      margin: 0 0 14px;
+    }
+    .empty .steps {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 14px;
+    }
+    .empty .steps li {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 4px 0;
+      color: var(--text-2);
+    }
+    .empty .steps b {
+      font: 600 var(--t-11)/1 var(--mono);
+      color: var(--accent);
+      width: 16px;
+      flex-shrink: 0;
+      letter-spacing: 0.04em;
     }
     .empty .hint {
-      font: 400 var(--t-11)/1.4 var(--mono);
-      color: var(--dim);
-      margin-top: 10px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      font: 400 var(--t-11)/1.5 var(--mono);
+      color: var(--text-3);
+      letter-spacing: 0.02em;
+    }
+    .empty code {
+      font: 400 var(--t-11)/1 var(--mono);
+      color: var(--text);
+      background: var(--surface-2);
+      padding: 1px 5px;
+      border-radius: 2px;
+    }
+    .empty.muted {
+      padding: 22px 24px;
+      margin: 16px;
+      max-width: 380px;
+    }
+    .empty.muted::before { width: 3px; }
+    .empty.muted h3 {
+      font: 500 var(--t-13)/1.3 var(--sans);
+      margin-bottom: 4px;
     }
   `;
   _store = new StoreSub(this);
@@ -658,19 +852,29 @@ class FilePreview extends LitElement {
     const { selectedPath, sheets, preview } = store;
     if (!selectedPath) {
       return html`<div class="empty">
-        请选择左侧文件以预览。
-        <div class="hint">支持 .xlsx / .xls / .xlsb / .ods</div>
+        <h3>Pick a file to preview.</h3>
+        <p>Three quick steps to see your data laid out:</p>
+        <ol class="steps">
+          <li><b>1.</b><span>Open a directory above</span></li>
+          <li><b>2.</b><span>Pick a file from the list on the left</span></li>
+          <li><b>3.</b><span>Cells appear here as a grid — click any to inspect</span></li>
+        </ol>
+        <div class="hint">Supports <code>.xlsx</code> · <code>.xls</code> · <code>.xlsb</code> · <code>.ods</code></div>
       </div>`;
     }
     if (sheets.length === 0) {
-      return html`<div class="empty">${selectedPath} 没有可预览的 sheet。</div>`;
+      return html`<div class="empty muted">
+        <h3>No sheets in this file.</h3>
+        <p>The file exists, but we couldn't find any tables inside. It may be empty or in an unsupported format.</p>
+        <div class="hint">Path: <code>${baseName(selectedPath)}</code></div>
+      </div>`;
     }
     if (!preview) {
-      return html`<div class="empty">加载中…</div>`;
+      return html`<div class="empty muted"><h3>Loading…</h3></div>`;
     }
     const rows = preview.rows || [];
     if (rows.length === 0) {
-      return html`<div class="empty">空 sheet。</div>`;
+      return html`<div class="empty muted"><h3>Empty sheet.</h3><p>This sheet has no rows.</p></div>`;
     }
     const ncols = Math.max(...rows.map((r) => r.length), 1);
     const sel = store.selectedCell;
@@ -795,87 +999,108 @@ class FilePreview extends LitElement {
 customElements.define('file-preview', FilePreview);
 
 // =============================================================================
-// <build-panel>
+// <build-panel> — Configuration · Actions · Output zones
 // =============================================================================
 
 class BuildPanel extends LitElement {
   static styles = css`
-    :host { display: block; padding: 16px; color: var(--paper); }
+    :host { display: block; padding: 14px; color: var(--text); }
     .head {
       font: 500 10px/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      margin-bottom: 12px;
-      display: flex; justify-content: space-between; align-items: baseline;
+      margin: 0 0 14px;
+      display: flex; align-items: center; gap: 9px;
     }
-    .group { margin-bottom: 12px; }
+    .head .dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--ok);
+      border-radius: 1px;
+    }
+    .zone-label {
+      font: 500 9px/1 var(--mono);
+      color: var(--text-3);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin: 16px 0 8px;
+    }
+    .zone-label:first-of-type { margin-top: 0; }
+    .zone-sep {
+      height: 1px;
+      background: var(--rule);
+      margin: 14px -14px 0;
+    }
+    .group { margin-bottom: 10px; }
     label.row {
       display: flex; gap: 8px; align-items: center;
       font: 500 var(--t-11)/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       margin-bottom: 6px;
       letter-spacing: 0.04em;
     }
-    label.row b { color: var(--paper); font-weight: 500; }
+    label.row b { color: var(--text); font-weight: 500; }
     select {
       width: 100%;
       font: 400 var(--t-12)/1 var(--mono);
-      color: var(--paper);
-      background: var(--panel-2);
+      color: var(--text);
+      background: var(--surface-2);
       border: 1px solid var(--rule);
       padding: 6px 8px;
       border-radius: 4px;
       outline: none;
       appearance: none;
       cursor: pointer;
+      transition: border-color 100ms ease, box-shadow 100ms ease;
     }
-    select:focus { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-soft); }
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-glow);
+    }
     .opts {
       display: grid; grid-template-columns: 1fr;
       gap: 8px;
       font: 400 var(--t-12)/1 var(--mono);
-      margin-bottom: 14px;
     }
     .opts label {
       display: flex; gap: 9px; align-items: center;
-      color: var(--graphite);
+      color: var(--text-2);
       cursor: pointer;
       user-select: none;
     }
     .opts input[type=checkbox] {
       appearance: none;
       width: 13px; height: 13px;
-      background: var(--panel-2);
+      background: var(--surface-2);
       border: 1px solid var(--rule-2);
       border-radius: 3px;
       display: inline-grid; place-items: center;
       cursor: pointer;
       transition: background 100ms, border-color 100ms;
     }
-    .opts input[type=checkbox]:hover { border-color: var(--amber); }
+    .opts input[type=checkbox]:hover { border-color: var(--accent); }
     .opts input[type=checkbox]:checked {
-      background: var(--amber);
-      border-color: var(--amber);
+      background: var(--accent);
+      border-color: var(--accent);
     }
     .opts input[type=checkbox]:checked::after {
       content: '';
       width: 5px; height: 2.5px;
-      border-left: 1.5px solid var(--ink);
-      border-bottom: 1.5px solid var(--ink);
+      border-left: 1.5px solid var(--bg);
+      border-bottom: 1.5px solid var(--bg);
       transform: translateY(-1px) rotate(-45deg);
     }
-    .opts label:has(input:checked) { color: var(--paper); }
+    .opts label:has(input:checked) { color: var(--text); }
 
     .actions {
       display: grid; grid-template-columns: 1fr 1fr 1fr;
       gap: 6px;
-      margin-bottom: 14px;
     }
     button.act {
       font: 600 var(--t-11)/1 var(--mono);
       letter-spacing: 0.06em;
-      color: var(--ink);
+      color: var(--bg);
       border: 1px solid;
       padding: 9px 6px;
       cursor: pointer;
@@ -886,17 +1111,18 @@ class BuildPanel extends LitElement {
     }
     button.act:hover:not(:disabled) { filter: brightness(1.08); }
     button.act:active:not(:disabled) { transform: translateY(1px); }
+    button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     button.act:disabled { opacity: .4; cursor: progress; }
     button.act[data-kind=build] {
-      background: var(--amber); border-color: var(--amber);
+      background: var(--accent); border-color: var(--accent);
     }
     button.act[data-kind=check] {
-      background: var(--cyan); border-color: var(--cyan);
+      background: var(--accent-2); border-color: var(--accent-2);
     }
     button.act[data-kind=validate] {
       background: transparent;
       border-color: var(--rule-2);
-      color: var(--graphite);
+      color: var(--text-2);
       border-style: dashed;
     }
     button.act .hint {
@@ -907,43 +1133,43 @@ class BuildPanel extends LitElement {
 
     .live {
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--cyan);
+      color: var(--accent-2);
       display: flex; align-items: center; gap: 7px;
-      margin-bottom: 8px;
+      margin-top: 10px;
       height: 14px;
       letter-spacing: 0.04em;
     }
     .live .dot {
       width: 7px; height: 7px;
-      background: var(--cyan);
+      background: var(--accent-2);
       border-radius: 50%;
-      box-shadow: 0 0 6px var(--cyan);
+      box-shadow: 0 0 6px var(--accent-2);
       animation: pulse 1.2s ease-in-out infinite;
     }
     @keyframes pulse { 50% { opacity: .3; } }
-    .live.off { color: var(--dim); }
-    .live.off .dot { background: var(--dim); box-shadow: none; animation: none; }
+    .live.off { color: var(--text-3); }
+    .live.off .dot { background: var(--text-3); box-shadow: none; animation: none; }
 
     /* ---- result card ---- */
     .out {
       font: 400 var(--t-11)/1.5 var(--mono);
-      background: var(--ink);
+      background: var(--surface-2);
       border: 1px solid var(--rule);
-      color: var(--paper);
+      color: var(--text);
       padding: 10px 12px;
       border-radius: 4px;
     }
     .out .row { display: flex; gap: 10px; padding: 2px 0; }
-    .out .k { color: var(--graphite); flex-shrink: 0; width: 64px; }
-    .out .v { color: var(--paper); word-break: break-all; }
-    .out .n { color: var(--cyan); font-variant-numeric: tabular-nums; }
-    .out .s { color: var(--amber); }
-    .out .e { color: var(--rose); }
-    .out .ok { color: var(--jade); }
+    .out .k { color: var(--text-2); flex-shrink: 0; width: 64px; }
+    .out .v { color: var(--text); word-break: break-all; }
+    .out .n { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+    .out .s { color: var(--accent); }
+    .out .e { color: var(--err); }
+    .out .ok { color: var(--ok); }
     .out .sep {
       height: 1px; background: var(--rule); margin: 6px 0;
     }
-    .out .placeholder { color: var(--dim); font-style: italic; }
+    .out .placeholder { color: var(--text-3); font-style: italic; }
 
     .diag-list {
       list-style: none; padding: 0; margin: 10px 0 0;
@@ -954,27 +1180,27 @@ class BuildPanel extends LitElement {
       border-left: 3px solid var(--rule-2);
       margin-bottom: 3px;
       font: 400 var(--t-11)/1.4 var(--mono);
-      background: var(--panel-2);
-      color: var(--paper);
+      background: var(--surface-2);
+      color: var(--text);
       border-radius: 0 3px 3px 0;
       display: flex; flex-direction: column; gap: 2px;
     }
-    .diag.error { border-left-color: var(--rose); }
-    .diag.warning { border-left-color: var(--amber); }
-    .diag.note { border-left-color: var(--cyan); }
+    .diag.error { border-left-color: var(--err); }
+    .diag.warning { border-left-color: var(--accent); }
+    .diag.note { border-left-color: var(--accent-2); }
     .diag .head { display: flex; gap: 8px; align-items: baseline; }
     .diag .sev {
       font-size: 9px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: var(--graphite);
+      color: var(--text-2);
       font-weight: 600;
     }
-    .diag.error .sev { color: var(--rose); }
-    .diag.warning .sev { color: var(--amber); }
-    .diag .code { color: var(--cyan); font-weight: 500; }
-    .diag .msg { color: var(--paper); }
-    .diag .where { color: var(--graphite); font-size: 10px; margin-top: 1px; }
+    .diag.error .sev { color: var(--err); }
+    .diag.warning .sev { color: var(--accent); }
+    .diag .code { color: var(--accent-2); font-weight: 500; }
+    .diag .msg { color: var(--text); }
+    .diag .where { color: var(--text-2); font-size: 10px; margin-top: 1px; }
   `;
   _store = new StoreSub(this);
 
@@ -982,9 +1208,11 @@ class BuildPanel extends LitElement {
     const { parserNames, activeParser, busy, lastResult } = store;
     return html`
       <div class="head">
+        <span class="dot" aria-hidden="true"></span>
         <span>BUILD &amp; CHECK</span>
       </div>
 
+      <div class="zone-label">Configuration</div>
       <div class="group">
         <label class="row"><b>format</b></label>
         <select id="fmt">
@@ -1006,6 +1234,9 @@ class BuildPanel extends LitElement {
         <label><input type="checkbox" id="includeFields"> include_fields</label>
         <label><input type="checkbox" id="write"> write to disk</label>
       </div>
+
+      <div class="zone-sep"></div>
+      <div class="zone-label">Actions</div>
       <div class="actions">
         <button class="act" data-kind="build" ?disabled=${busy} @click=${() => this.runAction('build')}>
           Build
@@ -1026,6 +1257,8 @@ class BuildPanel extends LitElement {
         <span>${busy ? 'running…' : 'idle'}</span>
       </div>
 
+      <div class="zone-sep"></div>
+      <div class="zone-label">Output</div>
       <div class="out">${this._renderResult(lastResult)}</div>
       ${this._renderDiagnostics(lastResult)}
     `;
@@ -1033,7 +1266,7 @@ class BuildPanel extends LitElement {
 
   _renderResult(last) {
     if (!last) {
-      return html`<div class="placeholder">尚未运行。</div>`;
+      return html`<div class="placeholder">Idle. ⌘B to build, ⌘C to check.</div>`;
     }
     if (last.kind === 'validate') {
       return html`
@@ -1164,7 +1397,7 @@ class StatusBar extends LitElement {
       display: flex; gap: 0; align-items: center;
       padding: 0 16px;
       font: 400 var(--t-11)/1 var(--mono);
-      color: var(--graphite);
+      color: var(--text-2);
       letter-spacing: 0.04em;
     }
     .seg {
@@ -1174,18 +1407,18 @@ class StatusBar extends LitElement {
     }
     .seg:first-child { padding-left: 0; }
     .seg:last-child { border-right: none; }
-    .seg b { color: var(--paper); font-weight: 500; }
+    .seg b { color: var(--text); font-weight: 500; }
     .seg .live-dot {
       width: 6px; height: 6px;
-      background: var(--dim);
+      background: var(--text-3);
       border-radius: 50%;
     }
-    .seg.busy .live-dot { background: var(--cyan); box-shadow: 0 0 4px var(--cyan); animation: blink 1.2s ease-in-out infinite; }
+    .seg.busy .live-dot { background: var(--accent-2); box-shadow: 0 0 4px var(--accent-2); animation: blink 1.2s ease-in-out infinite; }
     @keyframes blink { 50% { opacity: .3; } }
-    .seg.ok .live-dot { background: var(--jade); }
-    .seg.err .live-dot { background: var(--rose); }
+    .seg.ok .live-dot { background: var(--ok); }
+    .seg.err .live-dot { background: var(--err); }
     .spacer { flex: 1; }
-    .right { color: var(--dim); padding-right: 0; border-right: none; }
+    .right { color: var(--text-3); padding-right: 0; border-right: none; }
   `;
   _store = new StoreSub(this);
 

@@ -1,32 +1,72 @@
-/* tablec webui — global tokens + reset only. All component styles live in
-   each Lit element's `static styles`. CSS custom properties defined on
-   `:root` cross shadow DOM boundaries, so components reference them
-   directly via `var(--ink)` etc. */
+/* tablec webui — global tokens + reset.
+ *
+ * Two themes via [data-theme] on <html>:
+ *   - "dark"  (default) — "Inkwell":    deep graphite paper, warm amber accents
+ *   - "light"           — "Blueprint":  warm cream paper, deep amber accents
+ *
+ * Components live in their own `static styles` blocks inside Lit elements, but
+ * they reference these vars by role (bg/surface/text/accent), so flipping
+ * `data-theme` re-skins the whole tree without touching component code.
+ *
+ * Surface tiering is the key to hierarchy:
+ *   --bg        — outermost page (darkest in dark, lightest in light)
+ *   --surface   — panels (mid)
+ *   --surface-2 — raised cards, inputs, result card, grid bg
+ *
+ * In dark, bg < surface < surface-2 (lighter as we raise).
+ * In light, surface < bg < surface-2 reversed: cream paper (bg) is the warm
+ *   ground; pure-white cards (surface-2) pop above it.
+ */
 
+:root,
+:root[data-theme="dark"] {
+  /* Dark — "Inkwell" */
+  --bg:           #0E1116;
+  --surface:      #181C24;
+  --surface-2:    #232A36;
+  --text:         #E8ECF2;
+  --text-2:       #8A92A6;
+  --text-3:       #545C6E;
+  --rule:         #262C36;
+  --rule-2:       #323948;
+  --accent:       #F5C242;             /* amber */
+  --accent-soft:  rgba(245, 194, 66, 0.10);
+  --accent-glow:  rgba(245, 194, 66, 0.20);
+  --accent-2:     #5DD3C4;             /* teal */
+  --accent-2-soft:rgba(93, 211, 196, 0.10);
+  --err:          #E06C75;
+  --ok:           #7FB069;
+  --shadow-1:     0 1px 0 rgba(0,0,0,0.4);
+  --shadow-2:     0 6px 24px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="light"] {
+  /* Light — "Blueprint" */
+  --bg:           #EEE9DA;             /* warm cream paper */
+  --surface:      #FBFAF5;             /* subtle warm card */
+  --surface-2:    #FFFFFF;             /* pure white — raised */
+  --text:         #1A1B1F;
+  --text-2:       #5E6470;
+  --text-3:       #9097A2;
+  --rule:         #DCD6C8;             /* paper grain */
+  --rule-2:       #C7BFA9;
+  --accent:       #9C6F0E;             /* deep amber */
+  --accent-soft:  rgba(156, 111, 14, 0.10);
+  --accent-glow:  rgba(156, 111, 14, 0.22);
+  --accent-2:     #1F7A6E;             /* deep teal */
+  --accent-2-soft:rgba(31, 122, 110, 0.10);
+  --err:          #A83B43;
+  --ok:           #4F7E3E;
+  --shadow-1:     0 1px 0 rgba(60, 50, 30, 0.08);
+  --shadow-2:     0 6px 20px rgba(60, 50, 30, 0.12);
+}
+
+/* Tokens that don't change between themes. */
 :root {
-  /* Palette — "Lab Notebook" dark, with restrained amber + cyan accents. */
-  --ink:     #0D0F14;
-  --panel:   #14171E;
-  --panel-2: #1A1F28;
-  --rule:    #1F242E;
-  --rule-2: #2A313D;
-  --paper:   #E8ECF2;
-  --graphite:#6E7689;
-  --dim:     #4A5266;
-  --amber:   #F5C242;
-  --amber-soft: rgba(245, 194, 66, 0.08);
-  --amber-glow: rgba(245, 194, 66, 0.16);
-  --cyan:    #5DD3C4;
-  --cyan-soft: rgba(93, 211, 196, 0.08);
-  --rose:    #E06C75;
-  --jade:    #7FB069;
+  --mono:  ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+  --sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --serif: ui-serif, Georgia, 'Times New Roman', serif;
 
-  /* Typography — system stacks only; no web fonts. */
-  --mono:    ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
-  --sans:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --serif:   ui-serif, Georgia, 'Times New Roman', serif;
-
-  /* Scale (used by individual components) */
   --t-10: 10px;
   --t-11: 11px;
   --t-12: 12px;
@@ -42,32 +82,38 @@ html, body {
   padding: 0;
   height: 100%;
   font: var(--t-13)/1.45 var(--sans);
-  color: var(--paper);
-  background: var(--ink);
+  color: var(--text);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Smooth color transition on theme flip. */
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
-a { color: var(--cyan); text-decoration: none; }
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
 button, input, select, textarea {
   font: inherit;
   color: inherit;
 }
 
-::selection { background: var(--amber); color: var(--ink); }
+/* Selection: amber on dark, amber on light — accent reads in both. */
+::selection { background: var(--accent); color: var(--bg); }
 
-/* Scrollbars — keep them dark & quiet */
+/* Scrollbars — thin, themed. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--rule-2) transparent;
 }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 *::-webkit-scrollbar-track { background: transparent; }
 
 app-shell { display: block; height: 100%; }
 
+/* Respect reduced-motion globally. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
