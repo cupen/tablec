@@ -27,11 +27,13 @@ const store = {
   selectedPath: null,
   sheets: [],           // [{ name, row_count, col_count }]
   activeSheet: null,
-  preview: null,        // { sheet, rows, max_rows }
-  selectedCell: null,   // { row, col } in 0-indexed grid coords
+  preview: null,        // legacy raw grid (from /api/preview) — used by raw view toggle
+  parsed: null,         // { schema, rows, summary, diagnostics } from /api/parsed_preview
+  selectedCell: null,   // { row, col } in 0-indexed grid coords (parsed view: data-row offset)
   parserNames: [],
   activeParser: 'standard',
   configPath: null,
+  previewMode: 'parsed', // 'parsed' (default) or 'raw'
   busy: false,
   lastResult: null,     // { kind, status, payload }
 };
@@ -565,8 +567,21 @@ class FileList extends LitElement {
 customElements.define('file-list', FileList);
 
 // =============================================================================
-// <file-preview> — formula bar · sheet tabs · spreadsheet grid
+// <file-preview> — formula bar · sheet tabs · parsed/raw grid · summary
 // =============================================================================
+
+// `FieldType` is a serde-tagged enum; default representation is either a bare
+// string (for unit variants like "Int32") or `{VariantName: {…}}`. Map either
+// form to a short chip label for the schema row.
+function typeNameOf(t) {
+  if (t == null) return '?';
+  if (typeof t === 'string') return t.toLowerCase();
+  if (typeof t === 'object') {
+    const k = Object.keys(t)[0];
+    return k ? k.toLowerCase() : '?';
+  }
+  return '?';
+}
 
 class FilePreview extends LitElement {
   static styles = css`
@@ -623,10 +638,27 @@ class FilePreview extends LitElement {
     .formula .fn .val.num { color: var(--accent-2); }
     .formula .fn .val.bool { color: var(--accent); }
     .formula .fn .val.empty { color: var(--text-3); font-style: italic; }
+    .formula .fn .status {
+      margin-left: auto;
+      font: 600 9px/1 var(--mono);
+      padding: 3px 7px;
+      border-radius: 2px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .formula .fn .status.ok {
+      color: var(--ok);
+      background: rgba(127, 176, 105, 0.14);
+    }
+    .formula .fn .status.err {
+      color: var(--err);
+      background: rgba(224, 108, 117, 0.16);
+    }
 
-    /* ---- tabs (pill row) ---- */
+    /* ---- tabs (pill row + view-mode toggle) ---- */
     .tabs {
-      display: flex; gap: 2px;
+      display: flex; gap: 2px; align-items: center;
       padding: 8px 14px;
       background: var(--surface-2);
       border-bottom: 1px solid var(--rule);
@@ -657,6 +689,50 @@ class FilePreview extends LitElement {
       font-weight: 400;
     }
     .tab.active .size { color: var(--text-2); }
+    .view-toggle {
+      margin-left: auto;
+      display: inline-flex;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .view-toggle button {
+      font: 500 10px/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      background: transparent;
+      border: none;
+      padding: 5px 9px;
+      cursor: pointer;
+      transition: background 80ms, color 80ms;
+    }
+    .view-toggle button:hover {
+      color: var(--text);
+      background: var(--accent-soft);
+    }
+    .view-toggle button.active {
+      color: var(--bg);
+      background: var(--text);
+      font-weight: 600;
+    }
+    .view-toggle button + button { border-left: 1px solid var(--rule); }
+
+    /* ---- summary strip (parsed view) ---- */
+    .summary {
+      display: flex; align-items: center; gap: 14px;
+      padding: 6px 14px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--rule);
+      font: 400 var(--t-11)/1 var(--mono);
+      color: var(--text-2);
+      letter-spacing: 0.04em;
+    }
+    .summary .errs { color: var(--err); font-weight: 600; }
+    .summary .warns { color: var(--accent); font-weight: 600; }
+    .summary .ok { color: var(--ok); font-weight: 600; }
+    .summary .meta { margin-left: auto; color: var(--text-3); }
 
     /* ---- spreadsheet grid ---- */
     .body {
@@ -692,6 +768,36 @@ class FilePreview extends LitElement {
       user-select: none;
     }
     table.grid tr.letters th { top: 0; z-index: 3; }
+    table.grid tr.schema-info th {
+      top: 22px;
+      z-index: 2;
+      background: var(--surface-2);
+      text-align: left;
+    }
+    table.grid tr.schema-info .schema-label {
+      font: 500 9px/1 var(--mono);
+      color: var(--text-3);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    table.grid tr.schema-info .field-name {
+      color: var(--text);
+      font-weight: 500;
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+    table.grid tr.schema-info .col-type {
+      display: inline-block;
+      font: 500 9px/1 var(--mono);
+      color: var(--accent-2);
+      padding: 2px 6px;
+      margin-left: 6px;
+      background: var(--accent-2-soft);
+      border: 1px solid var(--rule-2);
+      border-radius: 2px;
+      letter-spacing: 0.04em;
+      vertical-align: middle;
+    }
     table.grid th.rowh {
       left: 0;
       z-index: 2;
@@ -709,8 +815,22 @@ class FilePreview extends LitElement {
       outline-offset: -1.5px;
       color: var(--text);
     }
-    table.grid td.schema { color: var(--text-2); font-style: italic; }
-    table.grid td.schema.col-name { color: var(--accent-2); font-style: normal; font-weight: 500; }
+    table.grid td.cell.error {
+      background: rgba(224, 108, 117, 0.10);
+      outline: 1.5px solid var(--err);
+      outline-offset: -1.5px;
+      color: var(--err);
+      cursor: help;
+    }
+    table.grid td.cell.error:hover {
+      background: rgba(224, 108, 117, 0.18);
+    }
+    table.grid td.cell.error .err-mark {
+      font: 500 9px/1 var(--mono);
+      color: var(--err);
+      margin-right: 4px;
+      letter-spacing: 0.04em;
+    }
     table.grid td.num { text-align: right; color: var(--accent-2); }
     table.grid td.bool { color: var(--accent); text-align: center; }
     table.grid td.null { color: var(--text-3); text-align: center; }
@@ -796,11 +916,25 @@ class FilePreview extends LitElement {
   }
 
   render() {
-    const { selectedPath, sheets, activeSheet, preview, selectedCell } = store;
-    const coord = selectedCell ? colLetter(selectedCell.col) + (selectedCell.row + 1) : null;
-    const cellValue = selectedCell && preview?.rows
-      ? preview.rows[selectedCell.row]?.[selectedCell.col]
-      : undefined;
+    const { selectedPath, sheets, activeSheet, parsed, preview,
+            selectedCell, previewMode } = store;
+
+    // Resolve coordinate + value for the formula bar based on current mode.
+    let coord = null;
+    let cellValue = null;
+    let cellError = null;
+    if (selectedCell) {
+      if (previewMode === 'parsed' && parsed?.rows?.length) {
+        const row = parsed.rows[selectedCell.row];
+        const cell = row?.cells?.[selectedCell.col];
+        if (row) coord = colLetter(selectedCell.col) + row.line;
+        cellValue = cell?.value;
+        cellError = cell?.error;
+      } else if (previewMode === 'raw' && preview?.rows?.length) {
+        coord = colLetter(selectedCell.col) + (selectedCell.row + 1);
+        cellValue = preview.rows[selectedCell.row]?.[selectedCell.col];
+      }
+    }
 
     return html`
       <div class="formula">
@@ -809,8 +943,13 @@ class FilePreview extends LitElement {
           <span class="src">${baseName(selectedPath || '')} · ${activeSheet ?? ''}</span>
           ${coord ? html`<span class="sep">▸</span>` : null}
           <span class="val ${cellClass(cellValue) || 'empty'}">
-            ${cellValue == null && !coord ? '点击任意单元格查看坐标' : this._renderFormulaValue(cellValue)}
+            ${coord ? this._renderFormulaValue(cellValue, previewMode) : '点击任意单元格查看坐标'}
           </span>
+          ${previewMode === 'parsed' && coord ? html`
+            <span class="status ${cellError ? 'err' : 'ok'}">
+              ${cellError ? '⚠ err' : '✓ ok'}
+            </span>
+          ` : null}
         </div>
       </div>
 
@@ -824,7 +963,23 @@ class FilePreview extends LitElement {
             <span class="size">${s.row_count ?? '?'}×${s.col_count ?? '?'}</span>
           </div>
         `)}
+        ${sheets.length > 0 ? html`
+          <div class="view-toggle" role="tablist" aria-label="preview mode">
+            <button
+              class=${previewMode === 'parsed' ? 'active' : ''}
+              @click=${() => this._setMode('parsed')}
+              title="Schema + per-cell validation"
+            >Parsed</button>
+            <button
+              class=${previewMode === 'raw' ? 'active' : ''}
+              @click=${() => this._setMode('raw')}
+              title="Raw cells from the file"
+            >Raw</button>
+          </div>
+        ` : null}
       </div>
+
+      ${previewMode === 'parsed' && parsed ? this._renderSummary(parsed) : null}
 
       <div class="body">
         ${this._renderBody()}
@@ -832,8 +987,30 @@ class FilePreview extends LitElement {
     `;
   }
 
-  _renderFormulaValue(cell) {
+  _renderSummary(parsed) {
+    const s = parsed.summary;
+    const errCls = s.error_count > 0 ? 'errs' : 'ok';
+    const warnCls = s.warning_count > 0 ? 'warns' : '';
+    return html`
+      <div class="summary">
+        <span>${s.shown_rows} / ${s.data_rows} rows</span>
+        <span class=${errCls}>${s.error_count} err</span>
+        <span class=${warnCls}>${s.warning_count} warn</span>
+        <span class="meta">schema · line ${parsed.data_start_row}</span>
+      </div>
+    `;
+  }
+
+  _renderFormulaValue(cell, mode) {
     if (cell == null) return html`<span style="font-style:italic">∅ empty</span>`;
+    // Parsed mode: `cell` is a plain JSON value (number / string / bool / object).
+    if (mode === 'parsed') {
+      if (typeof cell === 'number') return html`${cell}`;
+      if (typeof cell === 'boolean') return html`${cell ? 'TRUE' : 'FALSE'}`;
+      if (typeof cell === 'string') return html`"${cell}"`;
+      return html`${JSON.stringify(cell)}`;
+    }
+    // Raw mode: legacy tagged-enum shape from /api/preview.
     if (typeof cell === 'number') return html`${cell}`;
     if (typeof cell === 'string') return html`"${cell}"`;
     if (typeof cell === 'boolean') return html`${cell ? 'TRUE' : 'FALSE'}`;
@@ -849,15 +1026,15 @@ class FilePreview extends LitElement {
   }
 
   _renderBody() {
-    const { selectedPath, sheets, preview } = store;
+    const { selectedPath, sheets, parsed, preview, previewMode } = store;
     if (!selectedPath) {
       return html`<div class="empty">
         <h3>Pick a file to preview.</h3>
-        <p>Three quick steps to see your data laid out:</p>
+        <p>Three quick steps to see your data laid out — typed and validated:</p>
         <ol class="steps">
           <li><b>1.</b><span>Open a directory above</span></li>
           <li><b>2.</b><span>Pick a file from the list on the left</span></li>
-          <li><b>3.</b><span>Cells appear here as a grid — click any to inspect</span></li>
+          <li><b>3.</b><span>Cells appear here as a parsed grid — click any to inspect</span></li>
         </ol>
         <div class="hint">Supports <code>.xlsx</code> · <code>.xls</code> · <code>.xlsb</code> · <code>.ods</code></div>
       </div>`;
@@ -869,9 +1046,100 @@ class FilePreview extends LitElement {
         <div class="hint">Path: <code>${baseName(selectedPath)}</code></div>
       </div>`;
     }
-    if (!preview) {
-      return html`<div class="empty muted"><h3>Loading…</h3></div>`;
+    if (previewMode === 'parsed') {
+      if (!parsed) return html`<div class="empty muted"><h3>Loading…</h3></div>`;
+      return this._renderParsedBody(parsed);
     }
+    if (!preview) return html`<div class="empty muted"><h3>Loading…</h3></div>`;
+    return this._renderRawBody(preview);
+  }
+
+  _renderParsedBody(parsed) {
+    const schema = parsed.schema;
+    if (!schema || !schema.fields?.length) {
+      return html`<div class="empty muted">
+        <h3>No schema parsed.</h3>
+        <p>The schema parser didn't recognize this sheet. It may start with <code>#</code>, or the first row isn't field names.</p>
+        <div class="hint">Switch to <b>Raw</b> above to see the cells as-is.</div>
+      </div>`;
+    }
+    const fields = schema.fields;
+    const rows = parsed.rows;
+    if (!rows.length) {
+      return html`<div class="empty muted">
+        <h3>Schema OK, no data rows.</h3>
+        <p>Columns are declared, but rows after line ${parsed.data_start_row} are empty.</p>
+      </div>`;
+    }
+    const ncols = fields.length;
+    const sel = store.selectedCell;
+    const trs = [];
+
+    // Header row 1: column letters
+    const headCells = [html`<th class="corner"></th>`];
+    for (let c = 0; c < ncols; c++) headCells.push(html`<th>${colLetter(c)}</th>`);
+    trs.push(html`<tr class="letters">${headCells}</tr>`);
+
+    // Header row 2: schema info — field name + type chip per column
+    const schemaCells = [html`<th class="rowh"><span class="schema-label">schema</span></th>`];
+    for (let c = 0; c < ncols; c++) {
+      const f = fields[c];
+      schemaCells.push(html`<th>
+        <span class="field-name">${f.name}</span><span class="col-type">${typeNameOf(f.t)}</span>
+      </th>`);
+    }
+    trs.push(html`<tr class="schema-info">${schemaCells}</tr>`);
+
+    // Data rows
+    rows.forEach((row, ri) => {
+      const cells = [html`<th class="rowh">${row.line}</th>`];
+      for (let c = 0; c < ncols; c++) {
+        const cell = row.cells[c];
+        if (!cell) continue;
+        const isSelected = sel && sel.row === ri && sel.col === c;
+        const cls = [
+          'cell',
+          cell.error ? 'error' : '',
+          cellClassTyped(cell.value),
+          isSelected ? 'selected' : '',
+        ].filter(Boolean).join(' ');
+        const title = cell.error
+          ? `${cell.error} (raw: "${cell.raw || '∅'}")`
+          : '';
+        cells.push(html`
+          <td
+            tabindex="-1"
+            class=${cls}
+            data-row=${ri}
+            data-col=${c}
+            title=${title}
+            @click=${(e) => this._selectCell(ri, c, e)}
+          >${this._renderTypedCell(cell)}</td>
+        `);
+      }
+      trs.push(html`<tr>${cells}</tr>`);
+    });
+
+    return html`<table class="grid"><tbody>${trs}</tbody></table>`;
+  }
+
+  _renderTypedCell(cell) {
+    if (cell.error) {
+      return html`<span class="err-mark">⚠</span><span>${cell.raw || '∅'}</span>`;
+    }
+    const v = cell.value;
+    if (v === undefined || v === null) {
+      return html`<span class="null">·</span>`;
+    }
+    if (typeof v === 'number') return html`${v}`;
+    if (typeof v === 'boolean') return html`<span class="bool">${v ? '✓' : '✗'}</span>`;
+    if (typeof v === 'string') return html`${v}`;
+    if (Array.isArray(v)) return html`${JSON.stringify(v)}`;
+    if (typeof v === 'object') return html`${JSON.stringify(v)}`;
+    return html`${String(v)}`;
+  }
+
+  _renderRawBody(preview) {
     const rows = preview.rows || [];
     if (rows.length === 0) {
       return html`<div class="empty muted"><h3>Empty sheet.</h3><p>This sheet has no rows.</p></div>`;
@@ -880,21 +1148,17 @@ class FilePreview extends LitElement {
     const sel = store.selectedCell;
 
     const trs = [];
-    // Header row: column letters
     const headCells = [html`<th class="corner"></th>`];
     for (let c = 0; c < ncols; c++) headCells.push(html`<th>${colLetter(c)}</th>`);
     trs.push(html`<tr class="letters">${headCells}</tr>`);
 
     rows.forEach((row, ri) => {
-      const isSchema = ri < 5;
       const cells = [html`<th class="rowh">${ri + 1}</th>`];
       for (let c = 0; c < ncols; c++) {
         const cell = row[c];
         const isSelected = sel && sel.row === ri && sel.col === c;
         const cls = [
           'cell',
-          isSchema ? 'schema' : '',
-          c === 0 ? 'col-name' : '',
           cellClass(cell),
           isSelected ? 'selected' : '',
         ].filter(Boolean).join(' ');
@@ -924,9 +1188,19 @@ class FilePreview extends LitElement {
     if (store.activeSheet === name) return;
     store.activeSheet = name;
     store.selectedCell = null;
+    store.parsed = null;
     store.preview = null;
     notify();
-    this._loadPreview();
+    this._loadActive();
+  }
+
+  _setMode(mode) {
+    if (store.previewMode === mode) return;
+    store.previewMode = mode;
+    store.selectedCell = null;
+    notify();
+    if (mode === 'raw' && !store.preview) this._loadRaw();
+    else if (mode === 'parsed' && !store.parsed) this._loadParsed();
   }
 
   async _loadFor(path) {
@@ -934,6 +1208,7 @@ class FilePreview extends LitElement {
     store.sheets = [];
     store.activeSheet = null;
     store.preview = null;
+    store.parsed = null;
     store.selectedCell = null;
     notify();
     try {
@@ -942,7 +1217,7 @@ class FilePreview extends LitElement {
       if (sheets.length) {
         store.activeSheet = sheets[0].name;
         notify();
-        await this._loadPreview();
+        await this._loadActive();
       } else {
         notify();
       }
@@ -952,18 +1227,22 @@ class FilePreview extends LitElement {
     }
   }
 
-  async _loadPreview() {
+  async _loadActive() {
+    // Always keep both views fresh so toggling is instant.
+    await Promise.all([this._loadParsed(), this._loadRaw()]);
+  }
+
+  async _loadParsed() {
     if (!store.selectedPath || !store.activeSheet) return;
     try {
-      const grid = await getJson(
-        `/api/preview?path=${encodeURIComponent(store.selectedPath)}` +
-        `&sheet=${encodeURIComponent(store.activeSheet)}&max_rows=120`
+      const pp = await getJson(
+        `/api/parsed_preview?path=${encodeURIComponent(store.selectedPath)}` +
+        `&sheet=${encodeURIComponent(store.activeSheet)}` +
+        `&parser=${encodeURIComponent(store.activeParser)}` +
+        `&max_rows=120`
       );
-      store.preview = grid;
-      // Pick the first non-schema cell as initial selection if available.
-      if (grid.rows && grid.rows.length > 5) {
-        store.selectedCell = { row: 5, col: 0 };
-      } else if (grid.rows && grid.rows.length) {
+      store.parsed = pp;
+      if (pp.rows?.length && !store.selectedCell) {
         store.selectedCell = { row: 0, col: 0 };
       }
       notify();
@@ -973,11 +1252,30 @@ class FilePreview extends LitElement {
     }
   }
 
+  async _loadRaw() {
+    if (!store.selectedPath || !store.activeSheet) return;
+    try {
+      const grid = await getJson(
+        `/api/preview?path=${encodeURIComponent(store.selectedPath)}` +
+        `&sheet=${encodeURIComponent(store.activeSheet)}&max_rows=120`
+      );
+      store.preview = grid;
+      notify();
+    } catch (e) {
+      store.lastResult = { error: String(e) };
+      notify();
+    }
+  }
+
   _onKey = (e) => {
-    if (!store.selectedCell || !store.preview?.rows?.length) return;
+    const isParsed = store.previewMode === 'parsed';
+    const rows = isParsed ? store.parsed?.rows : store.preview?.rows;
+    if (!store.selectedCell || !rows?.length) return;
     const sel = store.selectedCell;
-    const nrows = store.preview.rows.length;
-    const ncols = Math.max(...store.preview.rows.map((r) => r.length), 1);
+    const nrows = rows.length;
+    const ncols = isParsed
+      ? (store.parsed.schema?.fields?.length || 1)
+      : Math.max(...rows.map((r) => r.length), 1);
     let { row, col } = sel;
     let handled = true;
     if (e.key === 'ArrowDown' && row < nrows - 1) row++;
@@ -996,6 +1294,15 @@ class FilePreview extends LitElement {
     }
   };
 }
+
+// CSS class for a typed cell value (parsed view).
+function cellClassTyped(v) {
+  if (v == null) return '';
+  if (typeof v === 'number') return 'num';
+  if (typeof v === 'boolean') return 'bool';
+  return '';
+}
+
 customElements.define('file-preview', FilePreview);
 
 // =============================================================================

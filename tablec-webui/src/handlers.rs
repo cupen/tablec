@@ -342,6 +342,51 @@ pub async fn api_preview(Query(q): Query<PreviewQuery>) -> Result<Json<Grid>, Ap
 }
 
 // -----------------------------------------------------------------------------
+// GET /api/parsed_preview?path=...&sheet=...&parser=standard&max_rows=120
+//
+// Default view of the preview pane: runs the schema parser + per-cell type
+// check, so the UI shows the file *as tablec will see it during build*, not
+// as raw bytes. /api/preview remains for the "view raw" toggle.
+// -----------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct ParsedPreviewQuery {
+    pub path: String,
+    pub sheet: String,
+    #[serde(default)]
+    pub parser: Option<String>,
+    #[serde(default)]
+    pub max_rows: Option<usize>,
+}
+
+pub async fn api_parsed_preview(
+    State(state): State<Arc<WebuiState>>,
+    Query(q): Query<ParsedPreviewQuery>,
+) -> Result<Json<excel::ParsedPreview>, ApiError> {
+    let p = PathBuf::from(&q.path);
+    if !p.exists() {
+        return Err(ApiError::not_found(format!(
+            "file not found: {}",
+            p.display()
+        )));
+    }
+    let parser_name = q
+        .parser
+        .clone()
+        .unwrap_or_else(|| "standard".to_string());
+    let max = q.max_rows.unwrap_or(120).clamp(1, 1000);
+    match excel::parsed_preview(&p, &q.sheet, &parser_name, &state.registry, max) {
+        Ok(pp) => Ok(Json(pp)),
+        Err(excel::ParsedPreviewError::UnknownParser { name, available }) => {
+            Err(ApiError::bad_request(format!(
+                "unknown parser '{name}'; available: {available:?}"
+            )))
+        }
+        Err(excel::ParsedPreviewError::Excel(e)) => Err(ApiError::from(e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
 // POST /api/build
 // -----------------------------------------------------------------------------
 
@@ -1062,6 +1107,89 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("does-not-exist"));
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/parsed_preview — happy + error paths
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn parsed_preview_returns_schema_and_typed_rows() {
+        let p = fixture_xlsx();
+        if !p.exists() {
+            eprintln!("skipping: fixture {} not present", p.display());
+            return;
+        }
+        let sheets = excel::list_sheets(&p).unwrap();
+        let target = sheets.first().unwrap().name.clone();
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
+        let url = format!(
+            "/api/parsed_preview?path={}&sheet={}&max_rows=20",
+            urlencoding::encode(&p.display().to_string()),
+            urlencoding::encode(&target),
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["sheet"].as_str(), Some(target.as_str()));
+        assert!(v["schema"]["fields"].is_array(), "schema.fields missing");
+        assert!(v["schema"]["fields"]
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false));
+        assert_eq!(v["data_start_row"].as_u64(), Some(5));
+        assert!(v["rows"].is_array());
+        assert!(v["rows"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
+        assert!(v["summary"]["error_count"].is_number());
+        assert!(v["summary"]["total_rows"].as_u64().unwrap() >= 5);
+    }
+
+    #[tokio::test]
+    async fn parsed_preview_rejects_unknown_parser() {
+        let p = fixture_xlsx();
+        if !p.exists() {
+            eprintln!("skipping: fixture {} not present", p.display());
+            return;
+        }
+        let sheets = excel::list_sheets(&p).unwrap();
+        let target = sheets.first().unwrap().name.clone();
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
+        let url = format!(
+            "/api/parsed_preview?path={}&sheet={}&parser=does-not-exist",
+            urlencoding::encode(&p.display().to_string()),
+            urlencoding::encode(&target),
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "bad_request");
+        assert!(v["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does-not-exist"));
+    }
+
+    #[tokio::test]
+    async fn parsed_preview_404_when_path_missing() {
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
+        let url = "/api/parsed_preview?path=%2Fno%2Fsuch.xlsx&sheet=Items";
+        let resp = app
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     // -------------------------------------------------------------------------

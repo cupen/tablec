@@ -40,6 +40,7 @@ pub fn router(state: Arc<WebuiState>) -> Router {
         .route("/api/files", get(handlers::api_files))
         .route("/api/sheets", get(handlers::api_sheets))
         .route("/api/preview", get(handlers::api_preview))
+        .route("/api/parsed_preview", get(handlers::api_parsed_preview))
         .route("/api/build", post(handlers::api_build))
         .route("/api/check", post(handlers::api_check))
         .route("/api/validate", post(handlers::api_validate))
