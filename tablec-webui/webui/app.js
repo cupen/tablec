@@ -170,6 +170,15 @@ const MOON_ICON = html`
     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
   </svg>`;
 
+const RELOAD_ICON = html`
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/>
+    <path d="M21 3v5h-5"/>
+    <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/>
+    <path d="M3 21v-5h5"/>
+  </svg>`;
+
 // =============================================================================
 // <app-shell> — top-level layout
 // =============================================================================
@@ -177,10 +186,9 @@ const MOON_ICON = html`
 class AppShell extends LitElement {
   static styles = css`
     :host {
-      display: grid;
-      grid-template-rows: auto 1fr 24px;
-      height: 100%;
-      background: var(--bg);
+      /* Layout-critical styles (display, grid-template-rows, height, background)
+       * are set on the outer 'app-shell' selector in style.css to win the
+       * cascade. Here we only style what's safe inside shadow DOM. */
       color: var(--text);
       font: var(--t-13)/1.45 var(--sans);
     }
@@ -223,6 +231,44 @@ class AppShell extends LitElement {
       letter-spacing: 0.08em;
     }
     .spacer { flex: 1; }
+    .dir-display {
+      display: inline-flex; align-items: center;
+      flex: 1; min-width: 0;
+      max-width: 640px;
+      font: 400 var(--t-12)/1 var(--mono);
+      color: var(--text-2);
+      letter-spacing: 0.02em;
+      overflow: hidden;
+    }
+    .dir-display .prefix {
+      color: var(--text-3);
+      padding-right: 6px;
+      flex-shrink: 0;
+    }
+    .dir-display .path {
+      color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      min-width: 0;
+    }
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      color: var(--text-2);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 5px 8px;
+      cursor: pointer;
+      transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+    }
+    .icon-btn:hover {
+      background: var(--surface-2);
+      color: var(--accent);
+      border-color: var(--rule-2);
+    }
+    .icon-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
     .meta {
       font: 400 var(--t-11)/1 var(--mono);
       color: var(--text-2);
@@ -251,12 +297,13 @@ class AppShell extends LitElement {
     }
     main {
       display: grid;
-      grid-template-columns: 280px 1fr 340px;
+      grid-template-columns: 280px minmax(0, 1fr) 340px;
       background: var(--rule);   /* gap color */
       gap: 1px;
       overflow: hidden;
+      min-height: 0;
     }
-    main > * { background: var(--surface); overflow: auto; min-width: 0; }
+    main > * { background: var(--surface); overflow: auto; min-width: 0; min-height: 0; }
     footer {
       background: var(--surface);
       border-top: 1px solid var(--rule);
@@ -276,12 +323,21 @@ class AppShell extends LitElement {
           tablec
           <span class="ver">webui</span>
         </span>
-        <dir-picker></dir-picker>
-        <span class="spacer"></span>
+        <span class="dir-display" title=${s.dir}>
+          <span class="prefix">~/</span><span class="path">${s.dir}</span>
+        </span>
         <span class="meta">
           <span>parser <b>${s.activeParser}</b></span>
           <span>cfg <b>${s.configPath ?? '(default)'}</b></span>
         </span>
+        <button
+          class="icon-btn"
+          @click=${() => refreshState()}
+          title="重新扫描 (⌘R)"
+          aria-label="Reload"
+        >
+          ${RELOAD_ICON}
+        </button>
         <button
           class="theme-toggle"
           @click=${() => this._theme.toggle()}
@@ -322,92 +378,6 @@ class AppShell extends LitElement {
   };
 }
 customElements.define('app-shell', AppShell);
-
-// =============================================================================
-// <dir-picker>
-// =============================================================================
-
-class DirPicker extends LitElement {
-  static styles = css`
-    :host { display: flex; gap: 0; align-items: center; flex: 1; max-width: 640px; }
-    .prefix {
-      font: 400 var(--t-11)/1 var(--mono);
-      color: var(--text-2);
-      padding: 6px 9px;
-      background: var(--surface-2);
-      border: 1px solid var(--rule);
-      border-right: none;
-      border-radius: 4px 0 0 4px;
-    }
-    input {
-      flex: 1; min-width: 0;
-      font: 400 var(--t-12)/1 var(--mono);
-      color: var(--text);
-      background: var(--surface-2);
-      border: 1px solid var(--rule);
-      border-left: none;
-      padding: 6px 10px;
-      outline: none;
-      border-radius: 0;
-      transition: border-color 100ms ease, box-shadow 100ms ease;
-    }
-    input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent-glow);
-    }
-    button {
-      font: 500 var(--t-11)/1 var(--mono);
-      color: var(--text);
-      background: var(--surface-2);
-      border: 1px solid var(--rule);
-      padding: 6px 12px;
-      cursor: pointer;
-      border-radius: 0;
-      letter-spacing: 0.02em;
-      transition: background 100ms ease, border-color 100ms ease;
-    }
-    button:hover { background: var(--rule); border-color: var(--rule-2); }
-    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    button.go {
-      background: var(--accent);
-      color: var(--bg);
-      border-color: var(--accent);
-      border-left: 1px solid var(--accent);
-      font-weight: 600;
-      border-radius: 0 4px 4px 0;
-    }
-    button.go:hover { filter: brightness(1.05); }
-    button.reload {
-      margin-left: 6px;
-      border-radius: 4px;
-      font-family: var(--mono);
-    }
-  `;
-  _store = new StoreSub(this);
-
-  render() {
-    return html`
-      <span class="prefix">~/</span>
-      <input
-        spellcheck="false"
-        autocomplete="off"
-        .value=${store.dir}
-        @keydown=${this._onKey}
-      />
-      <button class="go" @click=${this._go}>打开</button>
-      <button class="reload" title="重新扫描 (⌘R)" @click=${() => refreshState()}>⟳</button>
-    `;
-  }
-
-  _onKey = (e) => { if (e.key === 'Enter') this._go(); };
-  _go = async () => {
-    const input = this.renderRoot.querySelector('input');
-    store.dir = (input?.value || '.').trim() || '.';
-    notify();
-    await refreshState();
-  };
-}
-customElements.define('dir-picker', DirPicker);
 
 // =============================================================================
 // <file-list>

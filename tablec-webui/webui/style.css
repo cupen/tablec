@@ -111,7 +111,17 @@ button, input, select, textarea {
 *::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 *::-webkit-scrollbar-track { background: transparent; }
 
-app-shell { display: block; height: 100%; }
+/* AppShell lives in shadow DOM, but its layout-critical styles live here in
+ * the outer stylesheet so they win the cascade regardless of how the browser
+ * resolves the outer-vs-`:host` specificity tie. AppShell's own `:host` block
+ * only adds color/font. */
+app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) 24px;
+  height: 100vh;
+  background: var(--bg);
+}
+
 
 /* Respect reduced-motion globally. */
 @media (prefers-reduced-motion: reduce) {

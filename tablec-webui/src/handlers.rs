@@ -57,6 +57,7 @@ fn html_response(body: &str) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    no_cache(&mut resp);
     resp
 }
 
@@ -66,6 +67,7 @@ fn js_response(body: &str) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/javascript; charset=utf-8"),
     );
+    no_cache(&mut resp);
     resp
 }
 
@@ -75,7 +77,17 @@ fn css_response(body: &str) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/css; charset=utf-8"),
     );
+    no_cache(&mut resp);
     resp
+}
+
+/// Stamp a `Cache-Control: no-cache` header so dev iteration doesn't get
+/// masked by the browser's heuristic caching.
+fn no_cache(resp: &mut Response) {
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache"),
+    );
 }
 
 // -----------------------------------------------------------------------------
