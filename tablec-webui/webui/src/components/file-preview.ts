@@ -120,10 +120,15 @@ export class FilePreview extends LitElement {
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
+    .view-toggle wa-button {
+      --wa-form-control-height: 24px;
+      --wa-form-control-padding-inline: 9px;
+    }
     .view-toggle wa-button::part(base) {
       font: 500 10px/1 var(--mono);
       letter-spacing: 0.08em;
       text-transform: uppercase;
+      border-radius: 0;
     }
 
     /* ---- summary strip (parsed view) ---- */

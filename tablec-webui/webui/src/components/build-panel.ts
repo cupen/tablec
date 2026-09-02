@@ -51,7 +51,14 @@ export class BuildPanel extends LitElement {
       letter-spacing: 0.04em;
     }
     label.row b { color: var(--text); font-weight: 500; }
-    wa-select { width: 100%; }
+    wa-select {
+      width: 100%;
+      /* Compact form controls that match the original tight panel. */
+      --wa-form-control-height: 28px;
+      --wa-form-control-padding-inline: 8px;
+      --wa-form-control-border-radius: 4px;
+      font: 400 var(--t-12)/1 var(--mono);
+    }
     wa-select::part(listbox) {
       background: var(--surface-2);
       color: var(--text);
@@ -64,6 +71,7 @@ export class BuildPanel extends LitElement {
     .opts wa-checkbox {
       font: 400 var(--t-12)/1 var(--mono);
       color: var(--text-2);
+      --wa-form-control-toggle-size: 13px;
     }
 
     .actions {

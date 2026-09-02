@@ -15,6 +15,21 @@ fn main() {
              Run `pnpm build` in tablec-webui/webui to embed the frontend."
         );
     }
-    println!("cargo:rerun-if-changed=webui/dist/index.html");
-    println!("cargo:rerun-if-changed=webui/dist/assets");
+    // include_dir!'s expansion isn't filesystem-tracked on stable, so declare
+    // every dist file as a rerun trigger — a rebuilt frontend always
+    // re-embeds on the next `cargo build`.
+    println!("cargo:rerun-if-changed=webui/dist");
+    let mut stack = vec![dist.clone()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(rel) = path.strip_prefix(&dist) {
+                    println!("cargo:rerun-if-changed=webui/dist/{}", rel.to_string_lossy());
+                }
+            }
+        }
+    }
 }

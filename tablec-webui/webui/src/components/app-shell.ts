@@ -83,10 +83,27 @@ export class AppShell extends LitElement {
     .header-btns {
       display: flex; gap: 6px; align-items: center;
     }
+    .header-btns wa-button {
+      /* Compact header icon buttons — WA's default control height is built
+       * for forms; the header wants the original tight toolbar look. */
+      --wa-form-control-height: 28px;
+      --wa-form-control-padding-inline: 8px;
+    }
     .header-btns wa-button::part(base) {
       font: 400 var(--t-11)/1 var(--mono);
-      padding: 4px 8px;
+      border-radius: 4px;
     }
+    /* Three-pane layout: left rail · preview · right build panel.
+     * The 1px gap shows --rule as hairline separators. */
+    main {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 340px;
+      background: var(--rule);   /* gap color */
+      gap: 1px;
+      overflow: hidden;
+      min-height: 0;
+    }
+    main > * { background: var(--surface); overflow: auto; min-width: 0; min-height: 0; }
     footer {
       background: var(--surface);
       border-top: 1px solid var(--rule);
