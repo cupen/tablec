@@ -9,4 +9,5 @@ members = [
 default-members = [
     "tablec-core",
     "tablec-cli",
+    "tablec-webui",
 ]
