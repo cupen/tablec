@@ -84,10 +84,8 @@ fn css_response(body: &str) -> Response {
 /// Stamp a `Cache-Control: no-cache` header so dev iteration doesn't get
 /// masked by the browser's heuristic caching.
 fn no_cache(resp: &mut Response) {
-    resp.headers_mut().insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-cache"),
-    );
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
 }
 
 // -----------------------------------------------------------------------------
@@ -201,6 +199,9 @@ pub struct StateBody {
     pub active_parser: Option<String>,
     pub config_path: Option<String>,
     pub config_present: bool,
+    /// Absolute path spreadsheets are scanned in: `<dir>/<input_dir>` from
+    /// the resolved config. Surfaced so the UI can explain empty file lists.
+    pub input_dir: String,
 }
 
 pub async fn api_state(State(state): State<Arc<WebuiState>>) -> Json<StateBody> {
@@ -220,7 +221,20 @@ pub async fn api_state(State(state): State<Arc<WebuiState>>) -> Json<StateBody> 
         active_parser,
         config_path: cfg.1.map(|p| p.display().to_string()),
         config_present,
+        input_dir: resolve_input_dir(&state.dir, &cfg.0.data.input_dir)
+            .display()
+            .to_string(),
     })
+}
+
+/// Join `dir` with the configured `input_dir`, treating `"."` as "the
+/// directory itself" so paths don't grow a trailing `/.`.
+fn resolve_input_dir(dir: &Path, input_dir: &str) -> PathBuf {
+    if input_dir == "." {
+        dir.to_path_buf()
+    } else {
+        dir.join(input_dir)
+    }
 }
 
 async fn resolve_config(state: &WebuiState, dir: &Path) -> (Config, Option<PathBuf>) {
@@ -243,7 +257,7 @@ pub struct FilesQuery {
     pub dir: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
     pub path: String,
@@ -267,8 +281,16 @@ pub async fn api_files(
         )));
     }
 
+    // List files under the same directory build/check read from, so the
+    // preview list always matches what the actions operate on.
+    let (config, _) = resolve_config(&state, &dir).await;
+    let input_dir = resolve_input_dir(&dir, &config.data.input_dir);
+
     let mut entries = Vec::new();
-    let read = std::fs::read_dir(&dir)?;
+    if !input_dir.is_dir() {
+        return Ok(Json(entries));
+    }
+    let read = std::fs::read_dir(&input_dir)?;
     for entry in read.flatten() {
         let p = entry.path();
         if !p.is_file() {
@@ -382,18 +404,13 @@ pub async fn api_parsed_preview(
             p.display()
         )));
     }
-    let parser_name = q
-        .parser
-        .clone()
-        .unwrap_or_else(|| "standard".to_string());
+    let parser_name = q.parser.clone().unwrap_or_else(|| "standard".to_string());
     let max = q.max_rows.unwrap_or(120).clamp(1, 1000);
     match excel::parsed_preview(&p, &q.sheet, &parser_name, &state.registry, max) {
         Ok(pp) => Ok(Json(pp)),
-        Err(excel::ParsedPreviewError::UnknownParser { name, available }) => {
-            Err(ApiError::bad_request(format!(
-                "unknown parser '{name}'; available: {available:?}"
-            )))
-        }
+        Err(excel::ParsedPreviewError::UnknownParser { name, available }) => Err(
+            ApiError::bad_request(format!("unknown parser '{name}'; available: {available:?}")),
+        ),
         Err(excel::ParsedPreviewError::Excel(e)) => Err(ApiError::from(e)),
     }
 }
@@ -473,7 +490,18 @@ pub async fn api_build(
     }
 
     let (config, _config_from) = resolve_config(&state, &dir).await;
-    let input_path = dir.join(&config.data.input_dir);
+    let input_path = resolve_input_dir(&dir, &config.data.input_dir);
+    if !input_path.is_dir() {
+        return Err(ApiError::bad_request(format!(
+            "input directory not found: {} (input_dir = {:?} from {}); put spreadsheets there or set [data] input_dir in tablec.toml",
+            input_path.display(),
+            config.data.input_dir,
+            _config_from
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "built-in defaults".to_string()),
+        )));
+    }
 
     let started = Instant::now();
     let (project, diagnostics) = match build_project(&dir, &config, &input_path, parser.as_ref()) {
@@ -593,6 +621,19 @@ fn build_project(
 
     let mut tables = Vec::new();
     let mut diagnostics = Vec::new();
+    if files.is_empty() {
+        diagnostics.push(Diagnostic {
+            severity: tablec_core::core::diagnostic::Severity::Warning,
+            code: tablec_core::core::diagnostic::DiagnosticCode::Other,
+            message: format!(
+                "no spreadsheet files found under {} (include: {:?}, exclude: {:?})",
+                input_path.display(),
+                config.data.include.as_deref().unwrap_or(&[]),
+                config.data.exclude.as_deref().unwrap_or(&[]),
+            ),
+            location: tablec_core::core::diagnostic::SourceLocation::default(),
+        });
+    }
     for file in &files {
         match tablec_core::core::table::table::read_excel_with(&file.to_string_lossy(), parser) {
             Ok(mut t) => tables.append(&mut t),
@@ -656,8 +697,19 @@ pub async fn api_check(
             "plugin_paths from HTTP requests are not accepted (CLI flag only)",
         ));
     }
-    let (config, _) = resolve_config(&state, &dir).await;
-    let input_path = dir.join(&config.data.input_dir);
+    let (config, config_from) = resolve_config(&state, &dir).await;
+    let input_path = resolve_input_dir(&dir, &config.data.input_dir);
+    if !input_path.is_dir() {
+        return Err(ApiError::bad_request(format!(
+            "input directory not found: {} (input_dir = {:?} from {}); put spreadsheets there or set [data] input_dir in tablec.toml",
+            input_path.display(),
+            config.data.input_dir,
+            config_from
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "built-in defaults".to_string()),
+        )));
+    }
 
     let started = Instant::now();
     use tablec_core::core::config::find_excel_files;
@@ -670,6 +722,19 @@ pub async fn api_check(
 
     let mut tables = Vec::new();
     let mut diagnostics = Vec::new();
+    if files.is_empty() {
+        diagnostics.push(Diagnostic {
+            severity: tablec_core::core::diagnostic::Severity::Warning,
+            code: tablec_core::core::diagnostic::DiagnosticCode::Other,
+            message: format!(
+                "no spreadsheet files found under {} (include: {:?}, exclude: {:?})",
+                input_path.display(),
+                config.data.include.as_deref().unwrap_or(&[]),
+                config.data.exclude.as_deref().unwrap_or(&[]),
+            ),
+            location: tablec_core::core::diagnostic::SourceLocation::default(),
+        });
+    }
     for f in &files {
         match tablec_core::core::table::table::read_excel_with(
             &f.to_string_lossy(),
@@ -975,7 +1040,10 @@ mod tests {
         let s = std::str::from_utf8(&body).unwrap();
         // Sanity-check that the vendored Lit bundle really is Lit 3 with the
         // export shape we rely on (LitElement + lit-html).
-        assert!(s.contains("LitElement") || s.contains("lit-element"), "vendored file missing Lit");
+        assert!(
+            s.contains("LitElement") || s.contains("lit-element"),
+            "vendored file missing Lit"
+        );
         // Pin to the latest Lit 3 minor we vendored — catches accidental
         // bundle downgrades on rebuild.
         assert!(s.contains("3.3.3"), "vendored Lit version is not 3.3.3");
@@ -1006,14 +1074,147 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["dir"].as_str(), Some(dir.display().to_string().as_str()));
         assert!(v["parser_names"].is_array());
-        assert!(v["parser_names"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|n| n.as_str() == Some("standard")));
+        assert!(
+            v["parser_names"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n.as_str() == Some("standard"))
+        );
         assert_eq!(v["active_parser"].as_str(), Some("standard"));
         assert!(v["config_present"].is_boolean());
+        // input_dir surfaces the resolved scan path (<dir>/<input_dir>).
+        assert_eq!(
+            v["input_dir"].as_str(),
+            Some(dir.display().to_string().as_str()),
+            "no-config fallback must scan the state dir itself"
+        );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // -------------------------------------------------------------------------
+    // input_dir resolution & guards (webui fallback scans the dir itself)
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn files_lists_root_when_no_config_but_not_data_subdir() {
+        // Loose xlsx in the state dir + no tablec.toml → /api/files must
+        // list them (input_dir fallback is "."), even though a stray `data/`
+        // directory exists.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        std::fs::copy(fixture_xlsx(), tmp.path().join("loose.xlsx")).unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        assert!(
+            entries.iter().any(|e| e.name == "loose.xlsx"),
+            "expected loose.xlsx listed, got {entries:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_400_when_input_dir_missing() {
+        // tablec.toml points at data/ which doesn't exist → the action can't
+        // run at all, so it must fail loudly instead of "succeeding" on zero
+        // files.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \"data\"\n\n[export]\nformat = \"json\"\noutput_dir = \"output\"\n",
+        )
+        .unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"dir":"{}"}}"#,
+                tmp.path().display()
+            )))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), 8 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let msg = v["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("input directory not found"), "got: {msg}");
+        assert!(msg.contains("tablec.toml"), "hint missing: {msg}");
+    }
+
+    #[tokio::test]
+    async fn check_warns_when_input_dir_exists_but_empty() {
+        // Input dir exists (the state dir itself) but holds no spreadsheets
+        // → 200 with a Warning diagnostic, not a silent all-clear.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("readme.txt"), "not a spreadsheet").unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"dir":"{}"}}"#,
+                tmp.path().display()
+            )))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let diags = v["diagnostics"].as_array().unwrap();
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly the no-files warning: {diags:?}"
+        );
+        assert_eq!(diags[0]["severity"], "Warning");
+        assert!(
+            diags[0]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("no spreadsheet files found"),
+            "got: {diags:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_400_when_input_dir_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \"data\"\n\n[export]\nformat = \"json\"\noutput_dir = \"output\"\n",
+        )
+        .unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/build")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"dir":"{}","format":"json"}}"#,
+                tmp.path().display()
+            )))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     // -------------------------------------------------------------------------
@@ -1060,7 +1261,11 @@ mod tests {
             .await
             .unwrap();
         let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
-        assert!(!entries.is_empty(), "expected ≥1 file under {}", dir.display());
+        assert!(
+            !entries.is_empty(),
+            "expected ≥1 file under {}",
+            dir.display()
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1115,10 +1320,12 @@ mod tests {
             .await
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(v["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("does-not-exist"));
+        assert!(
+            v["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("does-not-exist")
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1151,10 +1358,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["sheet"].as_str(), Some(target.as_str()));
         assert!(v["schema"]["fields"].is_array(), "schema.fields missing");
-        assert!(v["schema"]["fields"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false));
+        assert!(
+            v["schema"]["fields"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        );
         assert_eq!(v["data_start_row"].as_u64(), Some(5));
         assert!(v["rows"].is_array());
         assert!(v["rows"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
@@ -1187,10 +1396,12 @@ mod tests {
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["error"], "bad_request");
-        assert!(v["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("does-not-exist"));
+        assert!(
+            v["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("does-not-exist")
+        );
     }
 
     #[tokio::test]
@@ -1301,11 +1512,7 @@ output_dir = "out"
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["written"], true);
         let on_disk = tmp.path().join("out").join("out.json");
-        assert!(
-            on_disk.exists(),
-            "expected {} to exist",
-            on_disk.display()
-        );
+        assert!(on_disk.exists(), "expected {} to exist", on_disk.display());
     }
 
     #[tokio::test]
@@ -1355,10 +1562,7 @@ output_dir = "out"
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["error"], "bad_request");
-        assert!(v["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("plugin_paths"));
+        assert!(v["message"].as_str().unwrap_or("").contains("plugin_paths"));
     }
 
     #[tokio::test]

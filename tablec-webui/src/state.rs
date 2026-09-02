@@ -58,7 +58,13 @@ impl WebuiState {
     /// 1. `config_path_override` if set on the state
     /// 2. `<dir>/tablec.toml`
     /// 3. `<dir>/.tablec.toml`
-    /// 4. [`Config::default`]
+    /// 4. [`Config::default`] with `input_dir` overridden to `"."`
+    ///
+    /// The override in case 4 is deliberate: the webui points at a folder
+    /// the user chose, so with no `tablec.toml` we scan that folder itself
+    /// instead of the CLI's `data/` convention — otherwise file listing,
+    /// build and check would all silently look at a subdirectory the user
+    /// never created.
     ///
     /// Returns the resolved config together with the path it was loaded
     /// from (`None` means "default constructed, no file").
@@ -76,7 +82,9 @@ impl WebuiState {
                 }
             }
         }
-        (Config::default(), None)
+        let mut cfg = Config::default();
+        cfg.data.input_dir = ".".to_string();
+        (cfg, None)
     }
 }
 
@@ -97,6 +105,8 @@ mod tests {
         assert!(from.is_none(), "expected no source path, got {from:?}");
         assert_eq!(cfg.project.name, "default");
         assert_eq!(cfg.export.format, "json");
+        // Webui fallback scans the pointed-at folder itself, not `data/`.
+        assert_eq!(cfg.data.input_dir, ".");
     }
 
     #[tokio::test]
