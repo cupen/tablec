@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 tablec-core = { path = "../tablec-core" }
 axum = "0.7"
+include_dir = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 webbrowser = "0.8"

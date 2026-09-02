@@ -8,6 +8,11 @@
  * they reference these vars by role (bg/surface/text/accent), so flipping
  * `data-theme` re-skins the whole tree without touching component code.
  *
+ * The same selectors bridge our tokens into Web Awesome's `--wa-*` design
+ * token system, so wa-* components (buttons, selects, checkboxes) inherit the
+ * Inkwell/Blueprint palette. The `wa-dark` / `wa-light` classes (kept in sync
+ * by src/theme.ts) switch Web Awesome's internal color scheme.
+ *
  * Surface tiering is the key to hierarchy:
  *   --bg        — outermost page (darkest in dark, lightest in light)
  *   --surface   — panels (mid)
@@ -38,6 +43,38 @@
   --ok:           #7FB069;
   --shadow-1:     0 1px 0 rgba(0,0,0,0.4);
   --shadow-2:     0 6px 24px rgba(0,0,0,0.35);
+
+  /* ---- Web Awesome bridge (dark) ---- */
+  --wa-font-family-body: var(--sans);
+  --wa-font-family-heading: var(--serif);
+  --wa-font-family-code: var(--mono);
+  /* brand variant → amber */
+  --wa-color-brand-fill-loud: var(--accent);
+  --wa-color-brand-on-loud: var(--bg);
+  --wa-color-brand-fill-normal: var(--accent);
+  --wa-color-brand-on-normal: var(--bg);
+  --wa-color-brand-fill-quiet: var(--accent-soft);
+  --wa-color-brand-on-quiet: var(--text);
+  /* success variant → teal */
+  --wa-color-success-fill-loud: var(--accent-2);
+  --wa-color-success-on-loud: var(--bg);
+  --wa-color-success-fill-normal: var(--accent-2);
+  --wa-color-success-on-normal: var(--bg);
+  --wa-color-success-fill-quiet: var(--accent-2-soft);
+  --wa-color-success-on-quiet: var(--text);
+  /* danger variant → err */
+  --wa-color-danger-fill-loud: var(--err);
+  --wa-color-danger-on-loud: var(--bg);
+  --wa-color-danger-fill-quiet: rgba(224, 108, 117, 0.16);
+  --wa-color-danger-on-quiet: var(--err);
+  /* form controls (wa-select / wa-checkbox / wa-button internals) */
+  --wa-form-control-background-color: var(--surface-2);
+  --wa-form-control-border-color: var(--rule-2);
+  --wa-form-control-border-radius: 4px;
+  --wa-form-control-activated-color: var(--accent);
+  --wa-form-control-label-color: var(--text-2);
+  --wa-form-control-value-color: var(--text);
+  --wa-focus-ring-color: var(--accent);
 }
 
 :root[data-theme="light"] {
@@ -59,6 +96,31 @@
   --ok:           #4F7E3E;
   --shadow-1:     0 1px 0 rgba(60, 50, 30, 0.08);
   --shadow-2:     0 6px 20px rgba(60, 50, 30, 0.12);
+
+  /* ---- Web Awesome bridge (light) ---- */
+  --wa-color-brand-fill-loud: var(--accent);
+  --wa-color-brand-on-loud: var(--bg);
+  --wa-color-brand-fill-normal: var(--accent);
+  --wa-color-brand-on-normal: var(--bg);
+  --wa-color-brand-fill-quiet: var(--accent-soft);
+  --wa-color-brand-on-quiet: var(--text);
+  --wa-color-success-fill-loud: var(--accent-2);
+  --wa-color-success-on-loud: var(--bg);
+  --wa-color-success-fill-normal: var(--accent-2);
+  --wa-color-success-on-normal: var(--bg);
+  --wa-color-success-fill-quiet: var(--accent-2-soft);
+  --wa-color-success-on-quiet: var(--text);
+  --wa-color-danger-fill-loud: var(--err);
+  --wa-color-danger-on-loud: var(--bg);
+  --wa-color-danger-fill-quiet: rgba(168, 59, 67, 0.14);
+  --wa-color-danger-on-quiet: var(--err);
+  --wa-form-control-background-color: var(--surface-2);
+  --wa-form-control-border-color: var(--rule-2);
+  --wa-form-control-border-radius: 4px;
+  --wa-form-control-activated-color: var(--accent);
+  --wa-form-control-label-color: var(--text-2);
+  --wa-form-control-value-color: var(--text);
+  --wa-focus-ring-color: var(--accent);
 }
 
 /* Tokens that don't change between themes. */
@@ -122,8 +184,7 @@ app-shell {
   background: var(--bg);
 }
 
-
-/* Respect reduced-motion globally. */
+/* Respect reduced motion globally. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

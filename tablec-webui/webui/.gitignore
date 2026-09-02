@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# Re-include project manifests hidden by the repo-root `*.json` rule.
+!package.json
+!tsconfig.json

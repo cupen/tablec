@@ -27,14 +27,13 @@ pub fn build_registry(
 
 /// Construct the axum [`Router`] for the webui.
 ///
-/// All endpoints live under `/api/*`. Static assets (HTML, CSS, JS) are
-/// served at the root paths `/`, `/static/app.js`, `/static/style.css`.
+/// All endpoints live under `/api/*`. The Vite-built frontend (`webui/dist/`,
+/// embedded at compile time) is served from `/` and any other extensionless
+/// path (SPA fallback); hashed assets resolve by their exact path.
 pub fn router(state: Arc<WebuiState>) -> Router {
     Router::new()
         .route("/", get(handlers::index_html))
-        .route("/static/app.js", get(handlers::app_js))
-        .route("/static/style.css", get(handlers::style_css))
-        .route("/static/vendor/lit.js", get(handlers::vendor_lit))
+        .route("/*path", get(handlers::static_asset))
         .route("/api/health", get(handlers::api_health))
         .route("/api/state", get(handlers::api_state))
         .route("/api/files", get(handlers::api_files))

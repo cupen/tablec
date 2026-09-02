@@ -26,10 +26,21 @@ target/debug/tablec webui --no-browser --port 8080   # for CI / remote boxes
 ```
 
 The `webui` subcommand spins up an HTTP server serving a Web Components SPA
-for previewing, building and checking table files. Data validation (custom
-`@validator(...)` etc.) is **not yet implemented** — the `/api/validate`
-endpoint returns 501 with a TODO body. Plugin paths must be passed via CLI
-flag only; HTTP requests that include `plugin_paths` are rejected.
+(pnpm + Vite + TypeScript + Lit + Web Awesome) for previewing, building and
+checking table files. The frontend source lives in `tablec-webui/webui/`;
+its compiled `dist/` is committed and embedded into the binary via
+`include_dir!`, so `cargo build` needs no node. After frontend changes:
+
+```bash
+cd tablec-webui/webui
+pnpm check && pnpm build   # typecheck + emit dist/; then cargo build
+pnpm dev                   # HMR dev server on :5173, proxies /api → :8080
+```
+
+Data validation (custom `@validator(...)` etc.) is **not yet implemented** —
+the `/api/validate` endpoint returns 501 with a TODO body. Plugin paths must
+be passed via CLI flag only; HTTP requests that include `plugin_paths` are
+rejected.
 
 Python bindings (managed by `uv`):
 

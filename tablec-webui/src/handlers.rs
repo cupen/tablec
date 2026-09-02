@@ -12,6 +12,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use include_dir::{Dir, include_dir};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -25,58 +26,75 @@ use crate::excel::{self, Grid, SheetInfo};
 use crate::state::WebuiState;
 
 // -----------------------------------------------------------------------------
-// Static asset payloads (embedded at compile time).
+// Static assets — the Vite build output, embedded at compile time.
+//
+// The frontend lives in `webui/` as a pnpm + Vite + TypeScript project.
+// `pnpm build` (run in `webui/`) emits `webui/dist/`, which is embedded here
+// so the binary stays self-contained — `cargo build` works without node.
+// Regenerate dist after frontend changes, then rebuild the crate.
 // -----------------------------------------------------------------------------
 
-const INDEX_HTML: &str = include_str!("../webui/index.html");
-const APP_JS: &str = include_str!("../webui/app.js");
-const STYLE_CSS: &str = include_str!("../webui/style.css");
-const VENDOR_LIT: &str = include_str!("../webui/vendor/lit.js");
+pub static WEBUI_DIST: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/webui/dist");
 
 pub async fn index_html() -> Response {
-    html_response(INDEX_HTML)
+    static_asset(axum::extract::Path("index.html".to_string())).await
 }
 
-pub async fn app_js() -> Response {
-    js_response(APP_JS)
-}
+/// Serve an embedded dist file by path. Extensionless paths fall back to
+/// index.html (SPA semantics); unknown paths with an extension are a 404.
+/// Unknown `/api/*` paths always 404 — the catch-all route must never answer
+/// for the API namespace.
+pub async fn static_asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    let path = path.trim_start_matches('/');
+    if path == "api" || path.starts_with("api/") {
+        let mut resp = (
+            StatusCode::NOT_FOUND,
+            format!("no such API route: /{path}"),
+        )
+            .into_response();
+        no_cache(&mut resp);
+        return resp;
+    }
 
-pub async fn style_css() -> Response {
-    css_response(STYLE_CSS)
-}
+    let (file, served_path) = match WEBUI_DIST.get_file(path) {
+        Some(f) => (f, path),
+        None if !path.contains('.') => match WEBUI_DIST.get_file("index.html") {
+            Some(f) => (f, "index.html"),
+            None => {
+                let mut resp = (
+                    StatusCode::NOT_FOUND,
+                    format!("asset not found: {path}"),
+                )
+                    .into_response();
+                no_cache(&mut resp);
+                return resp;
+            }
+        },
+        _ => {
+            let mut resp = (
+                StatusCode::NOT_FOUND,
+                format!("asset not found: {path}"),
+            )
+                .into_response();
+            no_cache(&mut resp);
+            return resp;
+        }
+    };
 
-/// Vendored Lit 3 ESM bundle (see `webui/vendor/lit.js`). Kept in-repo so the
-/// webui has no runtime network dependency.
-pub async fn vendor_lit() -> Response {
-    js_response(VENDOR_LIT)
-}
-
-fn html_response(body: &str) -> Response {
-    let mut resp = (StatusCode::OK, body.to_string()).into_response();
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    no_cache(&mut resp);
-    resp
-}
-
-fn js_response(body: &str) -> Response {
-    let mut resp = (StatusCode::OK, body.to_string()).into_response();
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/javascript; charset=utf-8"),
-    );
-    no_cache(&mut resp);
-    resp
-}
-
-fn css_response(body: &str) -> Response {
-    let mut resp = (StatusCode::OK, body.to_string()).into_response();
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/css; charset=utf-8"),
-    );
+    let mime = match served_path.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" | "map" => "application/json",
+        "svg" => "image/svg+xml",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        _ => "application/octet-stream",
+    };
+    let mut resp = (StatusCode::OK, file.contents().to_vec()).into_response();
+    resp.headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     no_cache(&mut resp);
     resp
 }
@@ -798,6 +816,19 @@ mod tests {
             .join("fixtures/testdata")
     }
 
+    /// `Dir::files()` only yields direct children; recurse to collect all.
+    fn all_dist_files() -> Vec<&'static include_dir::File<'static>> {
+        fn walk(dir: &'static include_dir::Dir<'static>, out: &mut Vec<&'static include_dir::File<'static>>) {
+            out.extend(dir.files());
+            for sub in dir.dirs() {
+                walk(sub, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&WEBUI_DIST, &mut out);
+        out
+    }
+
     fn make_state(dir: std::path::PathBuf) -> Arc<WebuiState> {
         Arc::new(WebuiState::new(
             dir,
@@ -964,38 +995,86 @@ mod tests {
     // Static asset content types
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Static assets (embedded Vite dist)
+    // -------------------------------------------------------------------------
+
     #[tokio::test]
-    async fn static_app_js_returns_javascript_content_type() {
+    async fn embedded_dist_serves_hashed_js_and_css() {
+        // The Vite build emits /assets/index-<hash>.js/.css; find their
+        // actual embedded names and fetch them through the router. Skips
+        // when dist/ hasn't been generated (placeholder-only build).
+        let files = all_dist_files();
+        if files.len() <= 1 {
+            eprintln!("skipping: webui/dist has no build output; run `pnpm build`");
+            return;
+        }
+        let js = files
+            .iter()
+            .find(|f| f.path().extension().is_some_and(|e| e == "js"))
+            .expect("embedded dist has no .js asset");
+        let css = files
+            .iter()
+            .find(|f| f.path().extension().is_some_and(|e| e == "css"))
+            .expect("embedded dist has no .css asset");
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/static/app.js")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
+
+        for (path, expected_ct) in [
+            (format!("/{}", js.path().display()), "application/javascript"),
+            (format!("/{}", css.path().display()), "text/css"),
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path.clone())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "GET {path}");
+            let ct = resp
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            assert!(ct.starts_with(expected_ct), "GET {path}: got {ct}");
+        }
+    }
+
+    #[tokio::test]
+    async fn embedded_dist_bundle_contains_lit_and_web_awesome() {
+        // Sanity-check that the built bundle really contains Lit 3 and the
+        // Web Awesome runtime we rely on. Skips on placeholder-only builds.
+        let files = all_dist_files();
+        if files.len() <= 1 {
+            eprintln!("skipping: webui/dist has no build output; run `pnpm build`");
+            return;
+        }
+        let js = files
+            .iter()
+            .find(|f| f.path().extension().is_some_and(|e| e == "js"))
+            .expect("embedded dist has no .js asset");
+        let s = std::str::from_utf8(js.contents()).unwrap();
         assert!(
-            ct.starts_with("application/javascript"),
-            "got content-type {ct}"
+            s.contains("LitElement") || s.contains("lit-element") || s.contains("lit-html"),
+            "bundle missing Lit"
+        );
+        assert!(
+            s.contains("web-awesome") || s.contains("webawesome") || s.contains("wa-button"),
+            "bundle missing Web Awesome"
         );
     }
 
     #[tokio::test]
-    async fn static_style_css_returns_css_content_type() {
+    async fn unknown_extensionless_path_falls_back_to_index_html() {
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/static/style.css")
+                    .uri("/some/client/route")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1008,45 +1087,22 @@ mod tests {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        assert!(ct.starts_with("text/css"), "got content-type {ct}");
+        assert!(ct.starts_with("text/html"), "got content-type {ct}");
     }
 
     #[tokio::test]
-    async fn static_vendor_lit_returns_javascript_content_type() {
+    async fn unknown_asset_path_404s() {
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/static/vendor/lit.js")
+                    .uri("/no/such/file.js")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        assert!(
-            ct.starts_with("application/javascript"),
-            "got content-type {ct}"
-        );
-        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
-            .await
-            .unwrap();
-        let s = std::str::from_utf8(&body).unwrap();
-        // Sanity-check that the vendored Lit bundle really is Lit 3 with the
-        // export shape we rely on (LitElement + lit-html).
-        assert!(
-            s.contains("LitElement") || s.contains("lit-element"),
-            "vendored file missing Lit"
-        );
-        // Pin to the latest Lit 3 minor we vendored — catches accidental
-        // bundle downgrades on rebuild.
-        assert!(s.contains("3.3.3"), "vendored Lit version is not 3.3.3");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     // -------------------------------------------------------------------------

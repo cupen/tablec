@@ -142,6 +142,24 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: tablec-webui/webui/pnpm-lock.yaml
+
+      - name: Build webui frontend
+        working-directory: tablec-webui/webui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:

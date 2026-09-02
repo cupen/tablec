@@ -1,14 +1,22 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark" class="wa-dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tablec webui</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Apply the persisted theme before first paint to avoid a flash.
+    // Mirrors src/theme.ts (THEME_KEY).
+    try {
+      if (localStorage.getItem('tablec-theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.documentElement.classList.replace('wa-dark', 'wa-light');
+      }
+    } catch { /* private mode */ }
+  </script>
 </head>
 <body>
   <app-shell></app-shell>
-  <script src="/static/vendor/lit.js" type="module"></script>
-  <script src="/static/app.js" type="module"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
