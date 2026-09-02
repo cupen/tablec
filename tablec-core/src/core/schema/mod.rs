@@ -234,7 +234,7 @@ impl SchemaParser for StandardSchemaParser {
 
     fn parse_schema(
         &self,
-        sheet_name: &str,
+        _sheet_name: &str,
         sheet: &[Vec<String>],
     ) -> Result<SchemaParseResult, Vec<crate::core::diagnostic::Diagnostic>> {
         use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};

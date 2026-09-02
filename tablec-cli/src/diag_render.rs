@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use tablec_core::core::diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceLocation};
+use tablec_core::core::diagnostic::{Diagnostic, Severity};
 
 pub(crate) fn render_diags<W: Write>(diags: &[Diagnostic], out: &mut W) -> io::Result<()> {
     for d in diags {
@@ -17,6 +17,9 @@ pub(crate) fn render_diags<W: Write>(diags: &[Diagnostic], out: &mut W) -> io::R
     Ok(())
 }
 
+// Currently test-only; wire into `tablec check` exit codes when CLI commands
+// start propagating diagnostics to the process exit status.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn diag_exit_code(diags: &[Diagnostic]) -> i32 {
     if diags.iter().any(|d| matches!(d.severity, Severity::Error)) {
         1
@@ -61,6 +64,7 @@ mod tests {
     use super::*;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
+    use tablec_core::core::diagnostic::{DiagnosticCode, SourceLocation};
 
     fn diag_with(sev: Severity, msg: &str) -> Diagnostic {
         Diagnostic {
