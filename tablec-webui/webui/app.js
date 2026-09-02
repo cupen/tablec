@@ -33,6 +33,7 @@ const store = {
   parserNames: [],
   activeParser: 'standard',
   configPath: null,
+  inputDir: null,       // resolved <dir>/<input_dir> — where files are scanned from
   previewMode: 'parsed', // 'parsed' (default) or 'raw'
   busy: false,
   lastResult: null,     // { kind, status, payload }
@@ -371,8 +372,8 @@ class AppShell extends LitElement {
     if (!(e.metaKey || e.ctrlKey)) return;
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-    if (e.key === 'b') { e.preventDefault(); document.querySelector('build-panel')?.runAction('build'); }
-    else if (e.key === 'c') { e.preventDefault(); document.querySelector('build-panel')?.runAction('check'); }
+    if (e.key === 'b') { e.preventDefault(); this.shadowRoot.querySelector('build-panel')?.runAction('build'); }
+    else if (e.key === 'c') { e.preventDefault(); this.shadowRoot.querySelector('build-panel')?.runAction('check'); }
     else if (e.key === 'r') { e.preventDefault(); refreshState(); }
     else if (e.key === 't') { e.preventDefault(); this._theme.toggle(); }
   };
@@ -491,7 +492,7 @@ class FileList extends LitElement {
   _store = new StoreSub(this);
 
   render() {
-    const { files, selectedPath, dir } = store;
+    const { files, selectedPath, dir, inputDir } = store;
     return html`
       <div class="head">
         <span class="dot" aria-hidden="true"></span>
@@ -500,12 +501,12 @@ class FileList extends LitElement {
       </div>
       ${files.length === 0
         ? html`<div class="empty">
-            <h3>No tables in this directory.</h3>
-            <p>Point the bar above at a folder that holds your <code>.xlsx</code> / <code>.xls</code> / <code>.xlsb</code> / <code>.ods</code> files.</p>
-            <div class="step"><b>1.</b><span>Type a path above and press 打开</span></div>
-            <div class="step"><b>2.</b><span>Files appear here as they're scanned</span></div>
+            <h3>No spreadsheets here yet.</h3>
+            <p>Put <code>.xlsx</code> / <code>.xls</code> / <code>.xlsb</code> / <code>.ods</code> files in the folder being scanned, then press Reload (⌘R) above.</p>
+            <div class="step"><b>1.</b><span>Drop spreadsheet files into the scanned folder</span></div>
+            <div class="step"><b>2.</b><span>Press Reload to rescan</span></div>
             <div class="step"><b>3.</b><span>Click one to preview and build</span></div>
-            <div class="hint">Currently scanning: <code>${dir || '.'}</code></div>
+            <div class="hint">Currently scanning: <code>${inputDir || dir || '.'}</code></div>
           </div>`
         : html`<ul>${files.map((f) => html`
             <li
@@ -530,8 +531,9 @@ class FileList extends LitElement {
     store.preview = null;
     store.selectedCell = null;
     notify();
-    // Defer to preview component via custom event for separation.
-    document.querySelector('file-preview')?._loadFor(path);
+    // file-list and file-preview are siblings inside <app-shell>'s shadow
+    // root; document.querySelector can't see past the shadow boundary.
+    this.getRootNode().querySelector('file-preview')?._loadFor(path);
   }
 }
 customElements.define('file-list', FileList);
@@ -1002,9 +1004,9 @@ class FilePreview extends LitElement {
         <h3>Pick a file to preview.</h3>
         <p>Three quick steps to see your data laid out — typed and validated:</p>
         <ol class="steps">
-          <li><b>1.</b><span>Open a directory above</span></li>
-          <li><b>2.</b><span>Pick a file from the list on the left</span></li>
-          <li><b>3.</b><span>Cells appear here as a parsed grid — click any to inspect</span></li>
+          <li><b>1.</b><span>Pick a file from the list on the left</span></li>
+          <li><b>2.</b><span>Cells appear here as a parsed grid — typed and validated</span></li>
+          <li><b>3.</b><span>Click any cell to inspect its coordinates and value</span></li>
         </ol>
         <div class="hint">Supports <code>.xlsx</code> · <code>.xls</code> · <code>.xlsb</code> · <code>.ods</code></div>
       </div>`;
@@ -1747,6 +1749,7 @@ async function refreshState() {
     store.parserNames = s.parser_names || [];
     store.activeParser = s.active_parser || 'standard';
     store.configPath = s.config_path;
+    store.inputDir = s.input_dir;
     notify();
   } catch (e) { console.error('refreshState', e); }
   try {
