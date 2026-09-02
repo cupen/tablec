@@ -3,13 +3,16 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-use crate::router;
 use crate::WebuiState;
+use crate::router;
 
 /// Launch the local webui: an HTTP server that serves a single-page
 /// Web Components UI for previewing, building and checking table files.
 #[derive(Parser, Debug)]
-#[command(name = "webui", about = "Launch local webui for previewing, building and checking tables")]
+#[command(
+    name = "webui",
+    about = "Launch local webui for previewing, building and checking tables"
+)]
 pub struct WebuiCommand {
     /// Directory to preview/build. Defaults to the current working directory.
     #[arg(long, short = 'd')]

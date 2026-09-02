@@ -16,9 +16,7 @@ use serde::Serialize;
 
 use tablec_core::core::diagnostic::{Diagnostic, SourceLocation};
 use tablec_core::core::parser::value_parser::parse_value;
-use tablec_core::core::schema::{
-    SchemaParseResult, SchemaParser, SchemaParserRegistry,
-};
+use tablec_core::core::schema::{SchemaParseResult, SchemaParser, SchemaParserRegistry};
 use tablec_core::core::table::constraint::Constraint;
 use tablec_core::core::table::field::{Field, FieldType};
 use tablec_core::core::table::value::Value;
@@ -298,10 +296,12 @@ pub fn parsed_preview_with(
         source: e,
     })?;
 
-    let range = wb.worksheet_range(sheet).map_err(|_| ExcelError::SheetNotFound {
-        path: path_str.clone(),
-        sheet: sheet.to_string(),
-    })?;
+    let range = wb
+        .worksheet_range(sheet)
+        .map_err(|_| ExcelError::SheetNotFound {
+            path: path_str.clone(),
+            sheet: sheet.to_string(),
+        })?;
 
     let total_rows = range.height();
     let raw: Vec<Vec<String>> = range
@@ -378,7 +378,13 @@ pub fn parsed_preview_with(
                     Err(d) => {
                         errs += 1;
                         diagnostics.push(d);
-                        (None, Some(format!("type mismatch: expected {}", field_type_name(&field.t))))
+                        (
+                            None,
+                            Some(format!(
+                                "type mismatch: expected {}",
+                                field_type_name(&field.t)
+                            )),
+                        )
                     }
                 }
             };
@@ -543,7 +549,11 @@ mod tests {
         assert!(pp.summary.total_rows >= 5);
         // Rows are typed: at least one cell should have a typed value, and the
         // basic fixture is well-formed so error_count stays 0.
-        assert!(pp.summary.error_count == 0, "unexpected errors: {:?}", pp.diagnostics);
+        assert!(
+            pp.summary.error_count == 0,
+            "unexpected errors: {:?}",
+            pp.diagnostics
+        );
         assert!(!pp.rows.is_empty(), "expected some data rows");
         assert!(
             pp.rows[0].cells.iter().any(|c| c.value.is_some()),
@@ -600,15 +610,10 @@ mod tests {
                 key: Box::new(FieldType::String),
                 value: Box::new(FieldType::Int32),
             },
-            FieldType::Struct {
-                fields: vec![],
-            },
+            FieldType::Struct { fields: vec![] },
         ];
         for c in cases {
-            assert!(
-                !field_type_name(&c).is_empty(),
-                "missing name for {c:?}"
-            );
+            assert!(!field_type_name(&c).is_empty(), "missing name for {c:?}");
         }
     }
 }
