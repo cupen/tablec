@@ -27,7 +27,10 @@ fn main() {
                 if path.is_dir() {
                     stack.push(path);
                 } else if let Ok(rel) = path.strip_prefix(&dist) {
-                    println!("cargo:rerun-if-changed=webui/dist/{}", rel.to_string_lossy());
+                    println!(
+                        "cargo:rerun-if-changed=webui/dist/{}",
+                        rel.to_string_lossy()
+                    );
                 }
             }
         }

@@ -47,11 +47,8 @@ pub async fn index_html() -> Response {
 pub async fn static_asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
     let path = path.trim_start_matches('/');
     if path == "api" || path.starts_with("api/") {
-        let mut resp = (
-            StatusCode::NOT_FOUND,
-            format!("no such API route: /{path}"),
-        )
-            .into_response();
+        let mut resp =
+            (StatusCode::NOT_FOUND, format!("no such API route: /{path}")).into_response();
         no_cache(&mut resp);
         return resp;
     }
@@ -61,21 +58,15 @@ pub async fn static_asset(axum::extract::Path(path): axum::extract::Path<String>
         None if !path.contains('.') => match WEBUI_DIST.get_file("index.html") {
             Some(f) => (f, "index.html"),
             None => {
-                let mut resp = (
-                    StatusCode::NOT_FOUND,
-                    format!("asset not found: {path}"),
-                )
-                    .into_response();
+                let mut resp =
+                    (StatusCode::NOT_FOUND, format!("asset not found: {path}")).into_response();
                 no_cache(&mut resp);
                 return resp;
             }
         },
         _ => {
-            let mut resp = (
-                StatusCode::NOT_FOUND,
-                format!("asset not found: {path}"),
-            )
-                .into_response();
+            let mut resp =
+                (StatusCode::NOT_FOUND, format!("asset not found: {path}")).into_response();
             no_cache(&mut resp);
             return resp;
         }
@@ -818,7 +809,10 @@ mod tests {
 
     /// `Dir::files()` only yields direct children; recurse to collect all.
     fn all_dist_files() -> Vec<&'static include_dir::File<'static>> {
-        fn walk(dir: &'static include_dir::Dir<'static>, out: &mut Vec<&'static include_dir::File<'static>>) {
+        fn walk(
+            dir: &'static include_dir::Dir<'static>,
+            out: &mut Vec<&'static include_dir::File<'static>>,
+        ) {
             out.extend(dir.files());
             for sub in dir.dirs() {
                 walk(sub, out);
@@ -1020,7 +1014,10 @@ mod tests {
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
 
         for (path, expected_ct) in [
-            (format!("/{}", js.path().display()), "application/javascript"),
+            (
+                format!("/{}", js.path().display()),
+                "application/javascript",
+            ),
             (format!("/{}", css.path().display()), "text/css"),
         ] {
             let resp = app
