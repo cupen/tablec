@@ -1,8 +1,9 @@
 //! axum HTTP handlers for the webui.
 //!
 //! All endpoints accept `Arc<WebuiState>` via axum's `State` extractor and
-//! return either `Json<T>` or [`ApiError`]. Static assets are served from
-//! `tablec-webui/webui/` via `include_str!` so the binary stays self-contained.
+//! return either `Json<T>` or [`ApiError`]. Static assets are the Vite build
+//! output (`webui/dist/`), embedded via `include_dir!` so the binary stays
+//! self-contained.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -86,12 +87,27 @@ pub async fn static_asset(axum::extract::Path(path): axum::extract::Path<String>
     let mut resp = (StatusCode::OK, file.contents().to_vec()).into_response();
     resp.headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
-    no_cache(&mut resp);
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control_for(served_path)),
+    );
     resp
 }
 
-/// Stamp a `Cache-Control: no-cache` header so dev iteration doesn't get
-/// masked by the browser's heuristic caching.
+/// Vite emits content-hashed filenames under `assets/`, so those responses
+/// may be cached forever — any content change produces a brand-new URL.
+/// Everything else (index.html, SPA fallback) must revalidate so a rebuilt
+/// frontend is picked up on the next refresh.
+fn cache_control_for(served_path: &str) -> &'static str {
+    if served_path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+/// Stamp a `Cache-Control: no-cache` header on responses that must always
+/// revalidate (error bodies, API 404s) — heuristic caching must not mask them.
 fn no_cache(resp: &mut Response) {
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
@@ -1042,6 +1058,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hashed_assets_cached_immutably_html_revalidates() {
+        // The split cache contract: content-hashed `assets/` files are
+        // cache-forever, while index.html (direct, root, and SPA-fallback
+        // routes) always revalidates. Skips on placeholder-only builds.
+        let files = all_dist_files();
+        if files.len() <= 1 {
+            eprintln!("skipping: webui/dist has no build output; run `pnpm build`");
+            return;
+        }
+        let js = files
+            .iter()
+            .find(|f| {
+                f.path().starts_with("assets/") && f.path().extension().is_some_and(|e| e == "js")
+            })
+            .expect("embedded dist has no hashed .js asset");
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
+
+        let cache_control = |resp: &Response| {
+            resp.headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string()
+        };
+
+        let js_uri = format!("/{}", js.path().display());
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(&js_uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "GET {js_uri}");
+        assert_eq!(
+            cache_control(&resp),
+            "public, max-age=31536000, immutable",
+            "GET {js_uri}"
+        );
+
+        for uri in ["/", "/index.html", "/some/client/route"] {
+            let resp = app
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "GET {uri}");
+            assert_eq!(cache_control(&resp), "no-cache", "GET {uri}");
+        }
+    }
+
+    #[tokio::test]
     async fn embedded_dist_bundle_contains_lit_and_web_awesome() {
         // Sanity-check that the built bundle really contains Lit 3 and the
         // Web Awesome runtime we rely on. Skips on placeholder-only builds.
@@ -1100,6 +1166,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let cc = resp
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(cc, "no-cache");
     }
 
     // -------------------------------------------------------------------------

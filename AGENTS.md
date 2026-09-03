@@ -28,8 +28,9 @@ target/debug/tablec webui --no-browser --port 8080   # for CI / remote boxes
 The `webui` subcommand spins up an HTTP server serving a Web Components SPA
 (pnpm + Vite + TypeScript + Lit + Web Awesome) for previewing, building and
 checking table files. The frontend source lives in `tablec-webui/webui/`;
-its compiled `dist/` is committed and embedded into the binary via
-`include_dir!`, so `cargo build` needs no node. After frontend changes:
+its compiled `dist/` is embedded into the binary via `include_dir!` — dist/
+itself is **not** committed: a fresh checkout needs one `pnpm build` in
+`tablec-webui/webui/` (until then `cargo build` embeds an empty placeholder). After frontend changes:
 
 ```bash
 cd tablec-webui/webui
