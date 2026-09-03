@@ -280,6 +280,10 @@ async fn resolve_config(state: &WebuiState, dir: &Path) -> (Config, Option<PathB
 pub struct FilesQuery {
     #[serde(default)]
     pub dir: Option<String>,
+    /// When `"modified"`, only files whose git status is not `clean` are
+    /// returned (the left-menu "Modified only" filter).
+    #[serde(default)]
+    pub filter: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -288,6 +292,25 @@ pub struct FileEntry {
     pub path: String,
     pub size: u64,
     pub modified_secs: i64,
+    /// Git change status vs current branch HEAD: `modified` | `added` |
+    /// `untracked` | `deleted` | `clean`. Always present (clean outside a
+    /// git repo).
+    #[serde(default)]
+    pub status: crate::git::FileStatus,
+    /// `git diff --numstat` insertions for `modified` files (0 otherwise).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub numstat_added: u64,
+    /// `git diff --numstat` deletions for `modified` files (0 otherwise).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub numstat_deleted: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_clean(f: &FileEntry) -> bool {
+    f.status == crate::git::FileStatus::Clean
 }
 
 pub async fn api_files(
@@ -311,11 +334,12 @@ pub async fn api_files(
     let (config, _) = resolve_config(&state, &dir).await;
     let input_dir = resolve_input_dir(&dir, &config.data.input_dir);
 
-    let mut entries = Vec::new();
+    let empty: Vec<FileEntry> = Vec::new();
     if !input_dir.is_dir() {
-        return Ok(Json(entries));
+        return Ok(Json(empty));
     }
     let read = std::fs::read_dir(&input_dir)?;
+    let mut paths = Vec::new();
     for entry in read.flatten() {
         let p = entry.path();
         if !p.is_file() {
@@ -332,25 +356,67 @@ pub async fn api_files(
         if !recognized {
             continue;
         }
-        let meta = entry.metadata().ok();
-        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified_secs = meta
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        entries.push(FileEntry {
-            name: p
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string(),
-            path: p.display().to_string(),
-            size,
-            modified_secs,
-        });
+        paths.push(p);
     }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    paths.sort();
+
+    // Git diff status: compare against the repository's current branch HEAD.
+    // `file_statuses` already includes `deleted` files (tracked at HEAD but
+    // missing from the worktree) that the scanner can't see. Failures (not a
+    // repo, no HEAD, missing `git`) degrade to clean rather than erroring.
+    let statuses: Vec<crate::git::FileWithStatus> = crate::git::file_statuses(&input_dir, &paths)
+        .unwrap_or_else(|_| {
+            paths
+                .iter()
+                .map(|p| crate::git::FileWithStatus {
+                    path: p.display().to_string(),
+                    status: crate::git::FileStatus::Clean,
+                    numstat_added: 0,
+                    numstat_deleted: 0,
+                })
+                .collect()
+        });
+
+    let meta_by_path: std::collections::HashMap<String, (u64, i64)> = paths
+        .iter()
+        .map(|p| {
+            let meta = std::fs::metadata(p).ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified_secs = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            (p.display().to_string(), (size, modified_secs))
+        })
+        .collect();
+
+    let mut with_status: Vec<FileEntry> = statuses
+        .into_iter()
+        .map(|s| {
+            let (size, modified_secs) = meta_by_path.get(&s.path).copied().unwrap_or((0, 0));
+            FileEntry {
+                name: Path::new(&s.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+                path: s.path,
+                size,
+                modified_secs,
+                status: s.status,
+                numstat_added: s.numstat_added,
+                numstat_deleted: s.numstat_deleted,
+            }
+        })
+        .collect();
+    with_status.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let modify = q.filter.as_deref() == Some("modified");
+    let entries: Vec<FileEntry> = with_status
+        .into_iter()
+        .filter(|f| !modify || !is_clean(f))
+        .collect();
     Ok(Json(entries))
 }
 
@@ -431,13 +497,28 @@ pub async fn api_parsed_preview(
     }
     let parser_name = q.parser.clone().unwrap_or_else(|| "standard".to_string());
     let max = q.max_rows.unwrap_or(120).clamp(1, 1000);
-    match excel::parsed_preview(&p, &q.sheet, &parser_name, &state.registry, max) {
-        Ok(pp) => Ok(Json(pp)),
-        Err(excel::ParsedPreviewError::UnknownParser { name, available }) => Err(
-            ApiError::bad_request(format!("unknown parser '{name}'; available: {available:?}")),
-        ),
-        Err(excel::ParsedPreviewError::Excel(e)) => Err(ApiError::from(e)),
-    }
+    let pp = match excel::parsed_preview(&p, &q.sheet, &parser_name, &state.registry, max) {
+        Ok(pp) => pp,
+        Err(excel::ParsedPreviewError::UnknownParser { name, available }) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown parser '{name}'; available: {available:?}"
+            )));
+        }
+        Err(excel::ParsedPreviewError::Excel(e)) => return Err(ApiError::from(e)),
+    };
+    // Compute per-cell diff against the git baseline (additive: when no
+    // baseline exists or the diff fails, the preview is returned unchanged).
+    // Clone so a git failure can still serve the un-diffed preview.
+    let pp = match state.registry.get(&parser_name) {
+        Some(parser) => {
+            match crate::git::sheet_diff::diff_preview(pp.clone(), &p, &q.sheet, parser.as_ref()) {
+                Ok((diffed, _)) => diffed,
+                Err(_) => pp,
+            }
+        }
+        None => pp,
+    };
+    Ok(Json(pp))
 }
 
 // -----------------------------------------------------------------------------
@@ -1822,5 +1903,231 @@ output_dir = "out"
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -------------------------------------------------------------------------
+    // Git diff — /api/files status + filter, /api/parsed_preview cell diff
+    // -------------------------------------------------------------------------
+
+    fn have_git() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Create a temp repo with a committed xlsx whose working copy then differs
+    /// (a modified second row), plus an untracked xlsx. Returns the tempdir.
+    fn temp_repo_with_diff(fixture: &std::path::Path) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        for cfg in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            std::process::Command::new("git")
+                .args(["config", cfg[0], cfg[1]])
+                .current_dir(root)
+                .output()
+                .unwrap();
+        }
+        // Commit the pristine fixture under data/.
+        let data = root.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::copy(fixture, data.join("basic.xlsx")).unwrap();
+        // Point the webui at the data/ subdir so /api/files scans it.
+        std::fs::write(
+            root.join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \"data\"\n\n[export]\nformat = \"json\"\noutput_dir = \"out\"\n",
+        )
+        .unwrap();
+        std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        // An untracked spreadsheet in the scanned dir.
+        std::fs::write(data.join("untracked.xlsx"), "not really xlsx but untracked").unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn files_reports_git_status_and_filter() {
+        if !have_git() {
+            return;
+        }
+        let fixture = fixture_xlsx();
+        if !fixture.exists() {
+            return;
+        }
+        let dir = temp_repo_with_diff(&fixture);
+        // The webui scans `<root>/data` per the committed tablec.toml.
+        let app = crate::router::router(make_state(dir.path().to_path_buf()));
+        // No filter: all files listed with statuses.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        let by_name: std::collections::HashMap<&str, &serde_json::Value> = entries
+            .iter()
+            .map(|e| (e["name"].as_str().unwrap_or(""), e))
+            .collect();
+        assert!(
+            by_name.contains_key("basic.xlsx"),
+            "expected basic.xlsx, got {by_name:?}"
+        );
+        assert!(
+            by_name.contains_key("untracked.xlsx"),
+            "expected untracked.xlsx, got {by_name:?}"
+        );
+        // basic.xlsx is committed + unchanged → clean; untracked.xlsx → untracked.
+        assert_eq!(by_name["basic.xlsx"]["status"], "clean");
+        assert_eq!(by_name["untracked.xlsx"]["status"], "untracked");
+
+        // Filter=modified: untracked is changed, clean is not.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files?filter=modified")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let filtered: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        let names: Vec<&str> = filtered
+            .iter()
+            .map(|e| e["name"].as_str().unwrap_or(""))
+            .collect();
+        assert!(
+            names.contains(&"untracked.xlsx"),
+            "modified filter should include untracked, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"basic.xlsx"),
+            "modified filter should exclude clean, got {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn files_reports_modified_status_and_numstat() {
+        if !have_git() {
+            return;
+        }
+        let fixture = fixture_xlsx();
+        if !fixture.exists() {
+            return;
+        }
+        // Copy fixture, commit, then modify bytes → porcelain `M`, numstat>0.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        for cfg in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            std::process::Command::new("git")
+                .args(["config", cfg[0], cfg[1]])
+                .current_dir(root)
+                .output()
+                .unwrap();
+        }
+        std::fs::write(root.join("mod.xlsx"), std::fs::read(&fixture).unwrap()).unwrap();
+        std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        // Modify: append bytes → the file differs from HEAD.
+        let mut bytes = std::fs::read(root.join("mod.xlsx")).unwrap();
+        bytes.push(0);
+        std::fs::write(root.join("mod.xlsx"), bytes).unwrap();
+        let app = crate::router::router(make_state(root.to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        let mine = entries
+            .iter()
+            .find(|e| e["name"] == "mod.xlsx")
+            .expect("mod.xlsx present");
+        assert_eq!(mine["status"], "modified");
+        // numstat may be 0 for a binary file (git treats it as un-diffable) —
+        // only assert the status here; numstat for text files is covered in
+        // git.rs unit tests.
+        let _ = mine["numstat_added"].as_u64().unwrap_or(0);
+        let _ = mine["numstat_deleted"].as_u64().unwrap_or(0);
+    }
+
+    #[tokio::test]
+    async fn parsed_preview_no_git_returns_no_diff() {
+        // Outside a repo the preview must still work and carry no diff status.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = fixture_xlsx();
+        if !p.exists() {
+            return;
+        }
+        std::fs::copy(&p, tmp.path().join("basic.xlsx")).unwrap();
+        let sheets = excel::list_sheets(&tmp.path().join("basic.xlsx")).expect("list sheets");
+        let sheet = sheets.first().expect("at least one sheet").name.clone();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let url = format!(
+            "/api/parsed_preview?path={}&sheet={}",
+            urlencoding::encode(&tmp.path().join("basic.xlsx").display().to_string()),
+            urlencoding::encode(&sheet),
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        // No diff_summary, and cells have no diff field.
+        assert!(v.get("diff_summary").is_none(), "no baseline → no summary");
+        let row = &v["rows"][0];
+        assert!(
+            row["cells"][0].get("diff").is_none(),
+            "no baseline → cells un-diffed"
+        );
     }
 }

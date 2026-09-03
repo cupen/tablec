@@ -229,3 +229,14 @@ tablec 通过 `SchemaParser` trait 暴露插件接口。用户实现该 trait �
 - 注意：动态 plugin 与 host 必须用相同 Rust 工具链编译（Rust ABI 不稳定）
 
 详细 API 见 `tablec-core/src/core/schema.rs`。
+
+## WebUI 差异预览（git 基线）
+
+webui（`tablec webui`）提供基于 git 的变更预览：以**当前分支 HEAD** 为基线，对比工作区表格内容。
+
+- 左侧文件列表：每个表格显示 `modified` / `added` / `untracked` / `deleted` / `clean` 状态（来自 `git status --porcelain`），`modified` 额外显示增删行数（`git diff --numstat`）；支持 **All files / Modified only** 过滤。
+- 解析预览：每个数据单元格标注 diff 状态 —— 新增 `added`（绿）、删除 `deleted`（红）、修改 `modified`（黄）。实现方式：把 HEAD blob（`git show HEAD:<path>`）写入临时文件，走与工作区**同一套 calamine 解析**，再按唯一键（无则按行号）对齐两版、逐格比较解析后的值（数值跨宽度相等视为未变）。
+- 非 git 仓库 / 无 HEAD / `git` 缺失：降级为 clean + 无色彩，不报错。
+- 信任边界：webui 从不接受 HTTP 传入的 plugin 路径；git 基线同样只读，不会改动仓库。
+
+详见 `openspec/specs/git-diff/spec.md` 与 `openspec/specs/webui/spec.md`。

@@ -1,11 +1,21 @@
 import { LitElement, html, css } from 'lit';
 import type { TemplateResult } from 'lit';
 
+import { refreshState } from '../api.js';
 import { extOf, humanSize } from '../format.js';
-import { StoreSub, notify, store } from '../store.js';
+import {
+  StoreSub,
+  notify,
+  store,
+  visibleFileCount,
+  visibleFiles,
+} from '../store.js';
+import type { FileStatus } from '../store.js';
 import type { FilePreview } from './file-preview.js';
 
 // <file-list> — left rail: scanned spreadsheets; click selects + previews.
+// Supports an "All files / Modified only" filter that re-fetches /api/files
+// with `filter=modified` and shows a colored dot + add/del counts per file.
 export class FileList extends LitElement {
   static styles = css`
     :host { display: block; }
@@ -31,6 +41,29 @@ export class FileList extends LitElement {
       color: var(--text);
       font-weight: 600;
       font-variant-numeric: tabular-nums;
+    }
+    .filter {
+      display: flex;
+      gap: 4px;
+      padding: 6px 16px 4px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .filter button {
+      flex: 1;
+      font: 500 11px/1 var(--sans);
+      color: var(--text-2);
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 5px 8px;
+      cursor: pointer;
+      transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+    }
+    .filter button:hover { background: var(--surface-2); }
+    .filter button.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--accent-2-soft);
     }
     ul { list-style: none; padding: 0; margin: 0; }
     li {
@@ -61,11 +94,28 @@ export class FileList extends LitElement {
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
+    .name .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.modified { background: #e6b800; }   /* changed → amber */
+    .status-dot.added,
+    .status-dot.untracked { background: #2ea043; } /* new → green */
+    .status-dot.deleted { background: #d1242f; }    /* removed → red */
+    .status-dot.clean { display: none; }
     .meta {
       font: 400 var(--t-11)/1 var(--mono);
       color: var(--text-2);
       letter-spacing: 0.02em;
+      display: flex; align-items: center; gap: 6px;
     }
+    .meta .numstat {
+      font: 500 10px/1 var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .meta .numstat .add { color: #2ea043; }
+    .meta .numstat .del { color: #d1242f; }
     .empty {
       padding: 22px 16px;
       color: var(--text-2);
@@ -113,11 +163,24 @@ export class FileList extends LitElement {
 
   render(): TemplateResult {
     const { files, selectedPath, dir, inputDir } = store;
+    const files2 = visibleFiles();
+    const count = visibleFileCount();
+    const filter = store.filesFilter;
     return html`
       <div class="head">
         <span class="dot" aria-hidden="true"></span>
         <span>FILES</span>
-        <span class="count">${String(files.length).padStart(2, '0')}</span>
+        <span class="count">${String(count).padStart(2, '0')}</span>
+      </div>
+      <div class="filter" role="group" aria-label="File filter">
+        <button
+          class=${filter === 'all' ? 'active' : ''}
+          @click=${() => this._setFilter('all')}
+        >All files</button>
+        <button
+          class=${filter === 'modified' ? 'active' : ''}
+          @click=${() => this._setFilter('modified')}
+        >Modified only</button>
       </div>
       ${files.length === 0
         ? html`<div class="empty">
@@ -128,19 +191,35 @@ export class FileList extends LitElement {
             <div class="step"><b>3.</b><span>Click one to preview and build</span></div>
             <div class="hint">Currently scanning: <code>${inputDir || dir || '.'}</code></div>
           </div>`
-        : html`<ul>${files.map((f) => html`
+        : html`<ul>${files2.map((f) => html`
             <li
               class=${selectedPath === f.path ? 'selected' : ''}
               @click=${() => this._select(f.path)}
             >
               <span class="name">
+                <span class="status-dot ${f.status || 'clean'}" title=${statusTitle(f.status)}></span>
                 ${f.name}
                 <span class="ext">${extOf(f.name)}</span>
               </span>
-              <span class="meta">${humanSize(f.size)} · ${new Date(f.modified_secs * 1000).toLocaleString()}</span>
+              <span class="meta">
+                <span>${humanSize(f.size)} · ${new Date(f.modified_secs * 1000).toLocaleString()}</span>
+                ${numstat(f)}
+              </span>
             </li>
-          `)}</ul>`}
+          `)}</ul>
+          ${files2.length === 0 && files.length > 0
+            ? html`<div class="empty"><h3>No modified files.</h3><p>Everything is up to date with HEAD. Switch to “All files” to see the full list.</p></div>`
+            : ''}
+        `}
     `;
+  }
+
+  _setFilter(f: 'all' | 'modified') {
+    if (store.filesFilter === f) return;
+    store.filesFilter = f;
+    notify();
+    // Re-fetch so the list matches the active filter (the server filters too).
+    void refreshState();
   }
 
   _select(path: string) {
@@ -157,6 +236,21 @@ export class FileList extends LitElement {
       .querySelector<FilePreview>('file-preview')
       ?._loadFor(path);
   }
+}
+
+function statusTitle(s?: FileStatus): string {
+  switch (s) {
+    case 'modified': return 'Modified';
+    case 'added': return 'Added (staged)';
+    case 'untracked': return 'Untracked (new)';
+    case 'deleted': return 'Deleted';
+    default: return 'No changes';
+  }
+}
+
+function numstat(f: { status?: FileStatus; numstat_added?: number; numstat_deleted?: number }) {
+  if (f.status !== 'modified' || (!f.numstat_added && !f.numstat_deleted)) return '';
+  return html`<span class="numstat"><span class="add">+${f.numstat_added ?? 0}</span> <span class="del">−${f.numstat_deleted ?? 0}</span></span>`;
 }
 
 customElements.define('file-list', FileList);

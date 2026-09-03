@@ -220,6 +220,11 @@ pub struct ParsedCell {
     pub error: Option<String>,
     /// Display name of the column type (e.g. "int32", "string", "array<int>").
     pub type_name: String,
+    /// Git diff status relative to HEAD (`added`/`deleted`/`modified`/
+    /// `unchanged`). `None` when no baseline exists (no repo / no HEAD /
+    /// file outside the repo) or the cell wasn't diffed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<crate::git::CellDiff>,
 }
 
 /// One data row + how many cells failed.
@@ -231,6 +236,20 @@ pub struct ParsedRow {
     pub line: usize,
     pub cells: Vec<ParsedCell>,
     pub error_count: usize,
+}
+
+impl ParsedCell {
+    /// Stamp a git diff status on this cell (used by the diff pass).
+    pub fn set_diff(&mut self, diff: crate::git::CellDiff) {
+        self.diff = Some(diff);
+    }
+}
+
+impl ParsedPreview {
+    /// Stamp a git diff summary on this preview (used by the diff pass).
+    pub fn set_diff_summary(&mut self, summary: crate::git::sheet_diff::DiffSummary) {
+        self.diff_summary = Some(summary);
+    }
 }
 
 /// Result of running the schema parser + per-cell validation on one sheet.
@@ -246,6 +265,10 @@ pub struct ParsedPreview {
     pub rows: Vec<ParsedRow>,
     pub diagnostics: Vec<Diagnostic>,
     pub summary: PreviewSummary,
+    /// Aggregate counts from comparing working tree against HEAD. `None`
+    /// when there is no git baseline or the sheet could not be diffed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_summary: Option<crate::git::sheet_diff::DiffSummary>,
 }
 
 /// Run schema + per-cell validation on `sheet` and return a [`ParsedPreview`].
@@ -315,31 +338,13 @@ pub fn parsed_preview_with(
     let schema_result = match parser.parse_schema(sheet, &raw) {
         Ok(r) => r,
         Err(diags) => {
-            return Ok(ParsedPreview {
-                sheet: sheet.to_string(),
-                schema: None,
-                data_start_row: 0,
-                total_rows,
-                shown_rows: 0,
-                rows: Vec::new(),
-                diagnostics: diags,
-                summary: empty_summary(total_rows),
-            });
+            return Ok(empty_preview(sheet, total_rows, diags));
         }
     };
 
     let schema = match schema_result {
         SchemaParseResult::Skip => {
-            return Ok(ParsedPreview {
-                sheet: sheet.to_string(),
-                schema: None,
-                data_start_row: 0,
-                total_rows,
-                shown_rows: 0,
-                rows: Vec::new(),
-                diagnostics: Vec::new(),
-                summary: empty_summary(total_rows),
-            });
+            return Ok(empty_preview(sheet, total_rows, Vec::new()));
         }
         SchemaParseResult::Schema(s) => s,
     };
@@ -393,6 +398,7 @@ pub fn parsed_preview_with(
                 value,
                 error,
                 type_name: field_type_name(&field.t).to_string(),
+                diff: None,
             });
         }
         total_errors += errs;
@@ -424,6 +430,7 @@ pub fn parsed_preview_with(
             error_count: total_errors,
             warning_count: warn_count,
         },
+        diff_summary: None,
     })
 }
 
@@ -434,6 +441,20 @@ fn empty_summary(total_rows: usize) -> PreviewSummary {
         total_rows,
         error_count: 0,
         warning_count: 0,
+    }
+}
+
+fn empty_preview(sheet: &str, total_rows: usize, diagnostics: Vec<Diagnostic>) -> ParsedPreview {
+    ParsedPreview {
+        sheet: sheet.to_string(),
+        schema: None,
+        data_start_row: 0,
+        total_rows,
+        shown_rows: 0,
+        rows: Vec::new(),
+        diagnostics,
+        summary: empty_summary(total_rows),
+        diff_summary: None,
     }
 }
 

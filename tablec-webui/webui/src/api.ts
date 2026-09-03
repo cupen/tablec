@@ -42,7 +42,10 @@ export async function refreshState(): Promise<void> {
     console.error('refreshState', e);
   }
   try {
-    const files = await getJson<FileEntry[]>(`/api/files?dir=${encodeURIComponent(store.dir)}`);
+    const filter = store.filesFilter === 'modified' ? '&filter=modified' : '';
+    const files = await getJson<FileEntry[]>(
+      `/api/files?dir=${encodeURIComponent(store.dir)}${filter}`,
+    );
     store.files = files;
     notify();
   } catch (e) {

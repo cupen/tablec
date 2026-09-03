@@ -13,6 +13,19 @@ export interface FileEntry {
   path: string;
   size: number;
   modified_secs: number;
+  /** Git change status vs current branch HEAD: modified|added|untracked|deleted|clean */
+  status?: FileStatus;
+  numstat_added?: number;
+  numstat_deleted?: number;
+}
+
+export type FileStatus = 'modified' | 'added' | 'untracked' | 'deleted' | 'clean';
+
+export type FilesFilter = 'all' | 'modified';
+
+/** True when a file status counts as "changed" for the Modified-only filter. */
+export function isChangedStatus(s?: FileStatus): boolean {
+  return !!s && s !== 'clean';
 }
 
 export interface SheetInfo {
@@ -32,6 +45,16 @@ export interface ParsedCell {
   value: unknown;
   error: string | null;
   type_name: string;
+  /** Git diff status vs HEAD: 'added'|'deleted'|'modified'|'unchanged'. Absent when no baseline. */
+  diff?: 'added' | 'deleted' | 'modified' | 'unchanged';
+}
+
+export interface DiffSummary {
+  compared_rows: number;
+  added_rows: number;
+  deleted_rows: number;
+  modified_cells: number;
+  changed_cells: number;
 }
 
 export interface ParsedRow {
@@ -75,6 +98,7 @@ export interface ParsedPreview {
   rows: ParsedRow[];
   diagnostics: Diagnostic[];
   summary: PreviewSummary;
+  diff_summary?: DiffSummary;
 }
 
 /** Legacy raw grid from /api/preview (Cell is a tagged enum). */
@@ -125,6 +149,8 @@ export interface AppStore {
   activeParser: string;
   configPath: string | null;
   previewMode: 'parsed' | 'raw';
+  /** Left-menu filter: show all files, or only files with git changes. */
+  filesFilter: FilesFilter;
   busy: boolean;
   lastResult: ActionResult | null;
 }
@@ -143,9 +169,24 @@ export const store: AppStore = {
   activeParser: 'standard',
   configPath: null,
   previewMode: 'parsed',
+  filesFilter: 'all',
   busy: false,
   lastResult: null,
 };
+
+/** Count of files the active filter shows: total, or changed-only. */
+export function visibleFileCount(): number {
+  return store.filesFilter === 'modified'
+    ? store.files.filter((f) => isChangedStatus(f.status)).length
+    : store.files.length;
+}
+
+/** Files the left menu renders under the active filter. */
+export function visibleFiles(): FileEntry[] {
+  return store.filesFilter === 'modified'
+    ? store.files.filter((f) => isChangedStatus(f.status))
+    : store.files;
+}
 
 const bus = new EventTarget();
 export const notify = () => bus.dispatchEvent(new Event('change'));

@@ -11,6 +11,7 @@
 
 pub mod command;
 pub mod excel;
+pub mod git;
 pub mod handlers;
 pub mod router;
 pub mod state;

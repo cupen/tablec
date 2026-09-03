@@ -179,6 +179,12 @@ Features exposed:
 - Browse the configured data directory and preview every sheet in every
   `.xlsx` / `.xls` / `.xlsb` / `.ods` file (first 5 schema rows + first 100
   data rows)
+- **Diff preview**: when the working directory is inside a git repository,
+  the file list shows each spreadsheet's status vs the current branch HEAD
+  (`modified` / `added` / `untracked` / `deleted` / `clean`) and a
+  "Modified only" filter; the parsed preview colors per-cell changes —
+  green for added, red for deleted, amber for modified. Outside a repo (or
+  without a HEAD) everything reports clean and no colors are shown.
 - Trigger a build with the chosen format (`json`, `json-pretty`, `msgpack`)
 - Trigger a check (validates per-table constraints *and* cross-table `@ref`
   — the latter is a fix on top of the CLI `check` command, which currently

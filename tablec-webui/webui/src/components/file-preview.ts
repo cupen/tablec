@@ -237,6 +237,31 @@ export class FilePreview extends LitElement {
     table.grid td.cell.error:hover {
       background: rgba(224, 108, 117, 0.18);
     }
+    /* Git diff colors — added green, deleted red, modified amber. */
+    table.grid td.cell.diff-added { background: rgba(46, 160, 67, 0.22); }
+    table.grid td.cell.diff-deleted { background: rgba(209, 36, 47, 0.22); }
+    table.grid td.cell.diff-modified { background: rgba(230, 184, 0, 0.22); }
+    table.grid td.cell.diff-added:hover,
+    table.grid td.cell.diff-deleted:hover,
+    table.grid td.cell.diff-modified:hover {
+      filter: brightness(1.05);
+    }
+    .legend {
+      display: flex; align-items: center; gap: 12px;
+      font: 400 11px/1 var(--sans);
+      color: var(--text-2);
+      padding: 6px 12px;
+      border-top: 1px solid var(--rule);
+      user-select: none;
+    }
+    .legend .swatch {
+      display: inline-block; width: 10px; height: 10px;
+      border-radius: 2px; margin-right: 4px;
+      vertical-align: -1px;
+    }
+    .legend .swatch.added { background: rgba(46, 160, 67, 0.6); }
+    .legend .swatch.deleted { background: rgba(209, 36, 47, 0.6); }
+    .legend .swatch.modified { background: rgba(230, 184, 0, 0.6); }
     table.grid td.cell.error .err-mark {
       font: 500 9px/1 var(--mono);
       color: var(--err);
@@ -488,6 +513,7 @@ export class FilePreview extends LitElement {
           'cell',
           cell.error ? 'error' : '',
           cellClassTyped(cell.value),
+          diffClass(cell.diff),
           isSelected ? 'selected' : '',
         ].filter(Boolean).join(' ');
         const title = cell.error ? `${cell.error} (raw: "${cell.raw || '∅'}")` : '';
@@ -505,7 +531,13 @@ export class FilePreview extends LitElement {
       trs.push(html`<tr>${cells}</tr>`);
     });
 
-    return html`<table class="grid"><tbody>${trs}</tbody></table>`;
+    return html`<table class="grid"><tbody>${trs}</tbody></table>
+      ${hasAnyDiff(parsed) ? html`<div class="legend">
+        <span><span class="swatch added"></span>added</span>
+        <span><span class="swatch deleted"></span>deleted</span>
+        <span><span class="swatch modified"></span>modified</span>
+        <span class="meta">vs HEAD</span>
+      </div>` : ''}`;
   }
 
   _renderRawBody(preview: RawGrid): TemplateResult {
@@ -665,6 +697,21 @@ export class FilePreview extends LitElement {
 }
 
 // ---- cell render helpers (module scope; pure functions of the data) ----
+
+/** Map a cell diff status to a grid class (empty → none). */
+function diffClass(d?: 'added' | 'deleted' | 'modified' | 'unchanged'): string {
+  switch (d) {
+    case 'added': return 'diff-added';
+    case 'deleted': return 'diff-deleted';
+    case 'modified': return 'diff-modified';
+    default: return '';
+  }
+}
+
+/** Whether a parsed preview carries any diff status (show the legend). */
+function hasAnyDiff(parsed: ParsedPreview): boolean {
+  return parsed.rows.some((r) => r.cells.some((c) => c.diff && c.diff !== 'unchanged'));
+}
 
 function cellValueClass(v: unknown): string {
   if (v == null) return 'empty';
