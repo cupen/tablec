@@ -934,7 +934,6 @@ pub mod sheet_diff {
 mod diff_preview_e2e_tests {
     use super::sheet_diff::diff_preview;
     use crate::excel::parsed_preview_with;
-    use std::path::Path;
     use std::process::Command;
     use tablec_core::core::schema::StandardSchemaParser;
 

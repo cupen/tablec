@@ -240,3 +240,16 @@ webui（`tablec webui`）提供基于 git 的变更预览：以**当前分支 HE
 - 信任边界：webui 从不接受 HTTP 传入的 plugin 路径；git 基线同样只读，不会改动仓库。
 
 详见 `openspec/specs/git-diff/spec.md` 与 `openspec/specs/webui/spec.md`。
+
+## WebUI 实时刷新（文件监听）
+
+webui 监听输入目录的文件变化，并通过 WebSocket 实时推送给前端，文件列表自动刷新，无需手动 Reload。
+
+- 监听：`notify` crate（Linux inotify / Windows ReadDirectoryChangesW / macOS FSEvents 或 kqueue），**非递归**监听解析出的输入目录（与 `/api/files` 列表一致）。
+- 事件只当"脏标记"：任何 create/modify/remove/rename 都触发一次目录重扫；400ms 静默窗口把编辑器"临时文件+rename"式保存的事件风暴合并为一次刷新。最终状态永远来自重扫，不依赖事件完整性（容忍 inotify 丢事件等平台差异）。
+- 推送：`/ws` WebSocket 端点，服务器通过 tokio broadcast 向所有连接广播 `files_changed`；客户端收到后调用 `refreshState()` 重新拉取文件列表（含当前过滤条件）。
+- 前端：启动即连 `/ws`；断线按指数退避重连（1s → 10s 封顶），重连成功后无条件重新拉取（覆盖断线期间的变化）；Reload 按钮（⌘R）始终保留为手动兜底。**无任何轮询定时器**。
+- 降级：输入目录不存在 / 监听失败（权限、inotify watch 上限）→ 记录日志，webui 照常工作（手动 Reload 可用），不崩溃。
+- 明确不做：文件变化**不会**触发 build/check（本特性只刷新预览列表）。
+
+详见 `openspec/specs/webui/spec.md`（Live file-change notifications 与 WebSocket endpoint and client lifecycle）。

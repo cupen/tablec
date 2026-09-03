@@ -64,6 +64,11 @@ impl WebuiCommand {
             config_override,
         ));
 
+        // Start the live file watcher on the resolved input directory. This
+        // resolves the config (read from disk, synchronously) and begins
+        // watching; failures degrade to manual reload, never crash the server.
+        state.start_watcher(&dir);
+
         let app = router::router(state.clone());
 
         let host = self.host.clone();

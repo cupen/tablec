@@ -16,6 +16,7 @@ use axum::response::{IntoResponse, Response};
 use include_dir::{Dir, include_dir};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::broadcast;
 
 use tablec_core::core::config::Config;
 use tablec_core::core::diagnostic::Diagnostic;
@@ -254,7 +255,7 @@ pub async fn api_state(State(state): State<Arc<WebuiState>>) -> Json<StateBody> 
 
 /// Join `dir` with the configured `input_dir`, treating `"."` as "the
 /// directory itself" so paths don't grow a trailing `/.`.
-fn resolve_input_dir(dir: &Path, input_dir: &str) -> PathBuf {
+pub(crate) fn resolve_input_dir(dir: &Path, input_dir: &str) -> PathBuf {
     if input_dir == "." {
         dir.to_path_buf()
     } else {
@@ -873,6 +874,60 @@ pub async fn api_validate() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented(
         "数据校验功能仍在研究中；CLI flag --no-browser / issue tablec-2fy",
     ))
+}
+
+// -----------------------------------------------------------------------------
+// GET /ws — live file-change notifications (WebSocket)
+// -----------------------------------------------------------------------------
+
+/// WebSocket upgrade for live file-change notifications. The client connects,
+/// then receives a `files_changed` text message whenever the watcher detects a
+/// change under the input directory. The message is idempotent — the client
+/// re-fetches the file list in response — so a lagged or reconnected client
+/// simply skips to the latest state and loses nothing important.
+pub async fn ws_events(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<Arc<WebuiState>>,
+) -> Response {
+    let tx = state.watcher.lock().unwrap().tx.clone();
+    ws.on_upgrade(move |socket| ws_events_loop(socket, tx))
+}
+
+async fn ws_events_loop(mut socket: axum::extract::ws::WebSocket, tx: broadcast::Sender<()>) {
+    use axum::extract::ws::Message;
+    use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::BroadcastStream;
+
+    let mut stream = BroadcastStream::new(tx.subscribe());
+    loop {
+        tokio::select! {
+            // Incoming client messages — we only care about close/ping; a
+            // closed socket ends the stream.
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+            // Outgoing: a files_changed broadcast.
+            ev = stream.next() => {
+                match ev {
+                    Some(Ok(())) => {
+                        if socket
+                            .send(Message::Text("files_changed".to_string()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    // Lagged/closed broadcast: the receiver was dropped (i.e.
+                    // the server is shutting down) — nothing left to push.
+                    Some(Err(_)) | None => continue,
+                }
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -2129,5 +2184,56 @@ output_dir = "out"
             row["cells"][0].get("diff").is_none(),
             "no baseline → cells un-diffed"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // /ws — live file-change notifications
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn ws_receives_files_changed_after_file_change() {
+        // End-to-end over a real TCP socket: connect to /ws, modify a file in
+        // the watched input dir, and expect a `files_changed` message back.
+        use futures_util::StreamExt;
+        use std::time::Duration;
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.xlsx"), b"x").unwrap();
+        let state = make_state(tmp.path().to_path_buf());
+        // Start the watcher on the input dir (no config → tmp itself).
+        state.start_watcher(tmp.path());
+
+        let app = crate::router::router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+        // Modify the watched file — the watcher (debounced) should broadcast.
+        std::fs::write(tmp.path().join("a.xlsx"), b"y").unwrap();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let got = loop {
+            if std::time::Instant::now() > deadline {
+                break false;
+            }
+            match tokio::time::timeout(Duration::from_millis(500), ws.next()).await {
+                Ok(Some(Ok(WsMessage::Text(t)))) if t == "files_changed" => break true,
+                Ok(_) => continue,
+                Err(_) => continue,
+            }
+        };
+        assert!(
+            got,
+            "expected a files_changed message over /ws after a file change"
+        );
+
+        drop(ws); // close the socket; the server task is aborted below
+        server.abort();
     }
 }

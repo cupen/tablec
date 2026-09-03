@@ -19,6 +19,8 @@ use tablec_core::core::config::Config;
 use tablec_core::core::schema::SchemaParserRegistry;
 use tokio::sync::Mutex;
 
+use crate::watcher::WatcherState;
+
 /// Shared state for the webui.
 pub struct WebuiState {
     /// Default directory for `dir=...` parameters that omit the query arg.
@@ -33,10 +35,16 @@ pub struct WebuiState {
     pub config_cache: Mutex<Option<Config>>,
     /// Server start time, used for the uptime string in `/api/health`.
     pub started_at: std::time::SystemTime,
+    /// Live file watcher: publishes "files changed" on a broadcast channel.
+    /// Mutex-wrapped so `start_watcher` can replace it after the input dir is
+    /// resolved; handlers lock it only to clone the broadcast sender.
+    pub watcher: std::sync::Mutex<WatcherState>,
 }
 
 impl WebuiState {
-    /// Construct a fresh `WebuiState`. Call once at startup.
+    /// Construct a fresh `WebuiState` with an unattached watcher. Call
+    /// [`Self::start_watcher`] after construction to begin watching the
+    /// resolved input directory.
     pub fn new(
         dir: PathBuf,
         registry: Arc<SchemaParserRegistry>,
@@ -50,7 +58,43 @@ impl WebuiState {
             config_path_override,
             config_cache: Mutex::new(None),
             started_at: std::time::SystemTime::now(),
+            watcher: std::sync::Mutex::new(WatcherState::inactive()),
         }
+    }
+
+    /// Resolve the config for `dir` and start watching its input directory.
+    /// Safe to call once at startup after the state is constructed. Watcher
+    /// failures never propagate — the webui keeps working with manual reload.
+    ///
+    /// Synchronous by design: the watcher itself is a std thread, and config
+    /// resolution here only reads files (no await points that matter). It
+    /// reuses the same discovery as the async `load_config_for`, minus the
+    /// cache, because callers run before any HTTP request could populate it.
+    pub fn start_watcher(&self, dir: &Path) {
+        let input_dir = if let Some(p) = &self.config_path_override {
+            if let Ok(c) = Config::load_from_file(p) {
+                crate::handlers::resolve_input_dir(dir, &c.data.input_dir)
+            } else {
+                dir.to_path_buf()
+            }
+        } else {
+            let mut found = None;
+            for name in ["tablec.toml", ".tablec.toml"] {
+                let p = dir.join(name);
+                if p.exists() {
+                    if let Ok(c) = Config::load_from_file(&p) {
+                        found = Some(c);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(c) => crate::handlers::resolve_input_dir(dir, &c.data.input_dir),
+                None => dir.to_path_buf(),
+            }
+        };
+        let watcher = WatcherState::start(&input_dir);
+        *self.watcher.lock().unwrap() = watcher;
     }
 
     /// Load a `Config` for `dir`. Honors (in order):

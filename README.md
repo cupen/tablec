@@ -185,6 +185,11 @@ Features exposed:
   "Modified only" filter; the parsed preview colors per-cell changes —
   green for added, red for deleted, amber for modified. Outside a repo (or
   without a HEAD) everything reports clean and no colors are shown.
+- **Live refresh**: the webui watches the input directory (inotify on Linux,
+  ReadDirectoryChangesW on Windows, FSEvents/kqueue on macOS) and pushes a
+  `files_changed` notification over a WebSocket (`/ws`) whenever a file is
+  created, modified, removed or renamed; the file list refreshes
+  automatically, with reconnect-backoff and a manual Reload (⌘R) fallback.
 - Trigger a build with the chosen format (`json`, `json-pretty`, `msgpack`)
 - Trigger a check (validates per-table constraints *and* cross-table `@ref`
   — the latter is a fix on top of the CLI `check` command, which currently

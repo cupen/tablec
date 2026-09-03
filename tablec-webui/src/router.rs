@@ -43,5 +43,6 @@ pub fn router(state: Arc<WebuiState>) -> Router {
         .route("/api/build", post(handlers::api_build))
         .route("/api/check", post(handlers::api_check))
         .route("/api/validate", post(handlers::api_validate))
+        .route("/ws", get(handlers::ws_events))
         .with_state(state)
 }

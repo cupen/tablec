@@ -4,6 +4,7 @@ import type { TemplateResult } from 'lit';
 import { StoreSub, store } from '../store.js';
 import { ThemeCtrl } from '../theme.js';
 import { refreshState } from '../api.js';
+import { startLiveReload } from '../live.js';
 import { MOON_ICON, SUN_ICON, RELOAD_ICON } from '../icons.js';
 import './file-list.js';
 import './file-preview.js';
@@ -160,6 +161,7 @@ export class AppShell extends LitElement {
 
   firstUpdated() {
     refreshState();
+    startLiveReload();
     // Global keyboard shortcuts: ⌘B build · ⌘C check · ⌘R reload · ⌘T theme.
     window.addEventListener('keydown', this._onKey);
   }

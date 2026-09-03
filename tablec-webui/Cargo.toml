@@ -5,8 +5,10 @@ edition = "2024"
 
 [dependencies]
 tablec-core = { path = "../tablec-core" }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 include_dir = "0.7"
+notify = "8"
+tokio-stream = { version = "0.1", features = ["sync"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 webbrowser = "0.8"
@@ -21,3 +23,6 @@ tempfile = "3.10.1"
 
 [dev-dependencies]
 serde_json = "1"
+tokio-tungstenite = "0.24"
+# For the /ws e2e test: connect as a real WebSocket client to the router.
+futures-util = "0.3"

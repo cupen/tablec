@@ -15,5 +15,6 @@ pub mod git;
 pub mod handlers;
 pub mod router;
 pub mod state;
+pub mod watcher;
 
 pub use state::WebuiState;
