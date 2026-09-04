@@ -191,21 +191,32 @@ pub fn file_statuses(dir: &Path, files: &[PathBuf]) -> Result<Vec<FileWithStatus
         numstat.insert(path, (a, d));
     }
 
-    // Working-tree relative paths for status mapping.
-    let dir_rel = dir
-        .strip_prefix(&baseline.repo_root)
-        .unwrap_or(Path::new(""))
-        .to_path_buf();
+    // Working-tree relative paths for status mapping. All prefix math happens
+    // over plain, `/`-separated strings: the webui's scan root can be a
+    // Windows verbatim path (`\\?\C:\...`, as `Path::canonicalize` yields)
+    // while `git rev-parse` prints plain forward-slash paths — component-wise
+    // `Path::strip_prefix` never matches across that divide, and every status
+    // would silently degrade to `clean`.
+    fn plain(p: &Path) -> String {
+        let s = p.to_string_lossy().replace('\\', "/");
+        s.strip_prefix("//?/").unwrap_or(&s).to_string()
+    }
+    let repo_root_s = plain(&baseline.repo_root);
+    let dir_s = plain(dir);
+    let dir_rel = dir_s
+        .strip_prefix(&repo_root_s)
+        .map(|r| r.trim_start_matches('/').to_string())
+        .unwrap_or_default();
 
     let mk = |p: &PathBuf| {
-        let abs = if p.is_absolute() {
-            p.clone()
+        let abs_s = if p.is_absolute() {
+            plain(p)
         } else {
-            baseline.repo_root.join(p)
+            format!("{repo_root_s}/{}", plain(p))
         };
-        let rel = abs
-            .strip_prefix(&baseline.repo_root)
-            .map(|r| r.display().to_string().replace('\\', "/"))
+        let rel = abs_s
+            .strip_prefix(&repo_root_s)
+            .map(|r| r.trim_start_matches('/').to_string())
             .unwrap_or_default();
         let status = match codes.get(&rel).map(String::as_str) {
             Some("??") => FileStatus::Untracked,
@@ -230,28 +241,22 @@ pub fn file_statuses(dir: &Path, files: &[PathBuf]) -> Result<Vec<FileWithStatus
     // lists existing files). We still surface them under the modified filter
     // per spec: walk the porcelain codes for `D` entries and append synthetic
     // entries for paths inside the scanned directory that weren't in `files`.
-    let dir_rel_str = dir_rel.display().to_string().replace('\\', "/");
-    let in_dir = |rel: &str| {
-        dir_rel == Path::new("")
-            || rel == dir_rel_str
-            || rel.starts_with(&format!("{dir_rel_str}/"))
-    };
+    let in_dir =
+        |rel: &str| dir_rel.is_empty() || rel == dir_rel || rel.starts_with(&format!("{dir_rel}/"));
     let mut out: Vec<FileWithStatus> = files.iter().map(mk).collect();
     for (rel, xy) in &codes {
         if !(xy.contains('D') && !xy.contains('A')) || !in_dir(rel) {
             continue;
         }
-        let full = baseline.repo_root.join(rel);
+        let full_s = format!("{repo_root_s}/{rel}");
         if out.iter().any(|f| {
-            let existing = PathBuf::from(&f.path);
-            existing == full
-                || existing == baseline.repo_root.join(rel)
-                || existing == dir.join(rel)
+            let existing = plain(Path::new(&f.path));
+            existing == full_s || existing == format!("{dir_s}/{rel}")
         }) {
             continue;
         }
         out.push(FileWithStatus {
-            path: full.display().to_string(),
+            path: full_s,
             status: FileStatus::Deleted,
             numstat_added: 0,
             numstat_deleted: 0,

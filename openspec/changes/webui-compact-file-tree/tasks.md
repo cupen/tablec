@@ -1,0 +1,30 @@
+## 1. Backend — `/api/files` recursive build-set listing
+
+- [x] 1.1 In `tablec-webui/src/handlers.rs`, replace the `read_dir` scan in `api_files` with `find_excel_files(input_dir, &config.data.include, &config.data.exclude)`; verify the resolved input directory string is passed the same way build/check pass it
+- [x] 1.2 Add `rel_path: String` to `FileEntry`; compute it by stripping the input directory prefix from each matched path and normalize `\` to `/`
+- [x] 1.3 Keep the git status/numstat merge, size/modified metadata, `filter=modified` server filtering, and deleted-file injection working over the recursive path set
+- [x] 1.4 Update the empty-input behavior: when the build set is empty, return `[]` (the existing empty-state UI explains include patterns)
+- [x] 1.5 Extend `handlers.rs` tests: fixture with nested subdirectories (root + `sub/` + `sub/deep/`) asserts recursive entries with correct `rel_path`; fixture with `tablec.toml` include/exclude asserts exclude wins; fixture asserts `.ods`/`.csv` absent under default config; fixture asserts `filter=modified` returns a modified nested file; `cargo test -p tablec-webui` passes
+
+## 2. Frontend — compact tree rail
+
+- [x] 2.1 Add `rel_path` to the `FileEntry` interface in `store.ts`; add `expandedDirs: Set<string>` store state and a `buildTree(files): TreeDir[]` helper (split `rel_path` on `/`, fold into directory trie, count files per directory)
+- [x] 2.2 Rework `file-list.ts` rendering: directory rows (chevron + name + file count) and indented single-line file rows (status dot + name + ext badge; numstat right-aligned when modified); row height ~24px with reduced padding; size/date moved to row `title` tooltip
+- [x] 2.3 Wire toggle: clicking a directory row adds/removes its path in `expandedDirs`; effective visibility = `expandedDirs` ∪ ancestors of visible files when `filesFilter === 'modified'` (computed at render, never written back)
+- [x] 2.4 Update empty states: keep the no-files guidance but reword the scanned-folder hint to "no files match the build include patterns" and mention `include` in `tablec.toml`; drop the now-wrong `.xlsb`/`.ods` mention from the drop-files copy
+- [x] 2.5 Preserve selection/preview: clicking a leaf row routes through the existing `_select` path (shadow-root sibling lookup) for nested files
+- [x] 2.6 `pnpm check && pnpm build` passes; manual matrix via `pnpm dev` against a fixture tree: hierarchy render, toggle, tooltip, expansion survives a live-reload refresh and a filter round-trip, modified-only auto-expands ancestors, nested file click previews — **verified live in browser (2026-09-05)**: tree hierarchy, 29px single-line rows, tooltip size/date, collapse persisted across Reload button + filter round-trip restored manual state, modified-only auto-expanded ancestors of a live-modified nested file (watcher → debounced recheck), nested click loaded preview
+- [x] 2.7 Error counts pipeline: `api.ts` gains a `runCheck()` wrapper; after each listing fetch (initial load, reload, `files_changed` — debounced trailing) run one `POST /api/check` and group `diagnostics[].location.file` into `diagnosticsByFile: Map<path, {errors, warnings}>` in `store.ts` (paths normalized to `/` to match `rel_path`; `file: None` diagnostics excluded from per-file counts); add `checkRunning` guard so a failed/in-flight check clears badges instead of showing stale numbers
+- [x] 2.8 Health display: file rows show an error badge (count, red) or warning badge (amber) as trailing element on the single line; directory rows show aggregate error counts beside the file count; rail header shows the total error count for the visible listing
+- [x] 2.9 Sort control: header control for factor (`name` | `modified` | `errors`) + direction toggle, stored in `store.ts`; files sort within directories by the factor, directories by the matching aggregate (alphabetical / latest contained mtime / total errors with warnings as tiebreak); default `name` ascending; missing counts compare as zero; manual matrix additions: badge rendering from a fixture with known errors/warnings, header total, sort by each factor with direction toggle, degraded rendering when the check request fails — **verified live in browser (2026-09-05)**: name default, errors asc/desc with directory aggregates, modified ordering by latest contained mtime with name tie-break; error badge bg `#d1242f`; header total "1 error in visible files". Note: amber warning-only badge not exercisable by fixture (`#`-prefixed sheets are skipped without emitting a diagnostic); check-failure degradation covered by the `checkRunning` guard code path and backend handler tests
+
+## 3. Consistency and validation
+
+- [x] 3.1 Update the README/design-doc snippets that describe the rail or `/api/files` listing behavior (direct-children wording) if any exist in-repo — no in-repo docs describe the old behavior (no `doc/design.md`; AGENTS.md makes no listing claim); empty-state copy updated in 2.4
+- [x] 3.2 `openspec validate --change webui-compact-file-tree --strict` passes
+- [x] 3.3 `cargo test --workspace` passes; `cargo fmt` clean — 457 passed / 0 failed; `cargo fmt --check` clean
+- [ ] 3.4 File a follow-up issue: `find_excel_files` extension whitelist (`xlsx`/`xls` only) excludes `.xlsb`/`.ods` even when include patterns match them — core-level decision needed separately. **Blocked: `bd` embedded-dolt requires CGO (unavailable on this machine) and `gh` CLI not installed — recorded in Follow-ups below; migrate to `bd` when the database is restored**
+
+## Follow-ups (migrate to `bd` when its dolt database is restored)
+
+- **`find_excel_files` glob dialect + extension whitelist** (from 3.4 + implementation findings): (a) a leading `**/` is stripped from patterns, so `**/*.xlsx` degrades to root-only matching; (b) a leading-`/` pattern combined with a *relative* `input_dir` (e.g. `.`) builds `./​/**/*.xlsx` and matches nothing (works with absolute dirs); (c) the extension whitelist accepts only `xlsx`/`xls`, so `.xlsb`/`.ods` never match even when patterns do. Decide core-level semantics, then align CLI + webui + docs.

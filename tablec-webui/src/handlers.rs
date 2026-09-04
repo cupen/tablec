@@ -18,10 +18,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::broadcast;
 
+use tablec_core::core::check::check_project;
 use tablec_core::core::config::Config;
 use tablec_core::core::diagnostic::Diagnostic;
 use tablec_core::core::project::project::Project;
-use tablec_core::core::table::constraint::ConstraintValidator;
 use tablec_core::export::{Format, Json as JsonFmt, Msgpack};
 
 use crate::excel::{self, Grid, SheetInfo};
@@ -291,6 +291,9 @@ pub struct FilesQuery {
 pub struct FileEntry {
     pub name: String,
     pub path: String,
+    /// Path relative to the resolved input directory, separators normalized
+    /// to `/`. The frontend derives the directory tree from this field.
+    pub rel_path: String,
     pub size: u64,
     pub modified_secs: i64,
     /// Git change status vs current branch HEAD: `modified` | `added` |
@@ -330,8 +333,10 @@ pub async fn api_files(
         )));
     }
 
-    // List files under the same directory build/check read from, so the
-    // preview list always matches what the actions operate on.
+    // List files under the same directory build/check read from, using the
+    // same enumeration — `find_excel_files` applies the config's include and
+    // exclude globs and recurses — so the listing IS the build set by
+    // construction and cannot drift from what the actions operate on.
     let (config, _) = resolve_config(&state, &dir).await;
     let input_dir = resolve_input_dir(&dir, &config.data.input_dir);
 
@@ -339,26 +344,12 @@ pub async fn api_files(
     if !input_dir.is_dir() {
         return Ok(Json(empty));
     }
-    let read = std::fs::read_dir(&input_dir)?;
-    let mut paths = Vec::new();
-    for entry in read.flatten() {
-        let p = entry.path();
-        if !p.is_file() {
-            continue;
-        }
-        let ext = p
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_ascii_lowercase());
-        let recognized = matches!(
-            ext.as_deref(),
-            Some("xlsx") | Some("xls") | Some("xlsb") | Some("ods")
-        );
-        if !recognized {
-            continue;
-        }
-        paths.push(p);
-    }
+    let mut paths = tablec_core::core::config::find_excel_files(
+        &input_dir.to_string_lossy(),
+        config.data.include.as_deref().unwrap_or(&[]),
+        config.data.exclude.as_deref().unwrap_or(&[]),
+    )
+    .map_err(|e| ApiError::internal(format!("failed to enumerate input files: {e}")))?;
     paths.sort();
 
     // Git diff status: compare against the repository's current branch HEAD.
@@ -402,7 +393,8 @@ pub async fn api_files(
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string(),
-                path: s.path,
+                path: s.path.clone(),
+                rel_path: rel_path_for(&s.path, &input_dir),
                 size,
                 modified_secs,
                 status: s.status,
@@ -419,6 +411,35 @@ pub async fn api_files(
         .filter(|f| !modify || !is_clean(f))
         .collect();
     Ok(Json(entries))
+}
+
+/// Path of `path` relative to `input_dir`, separators normalized to `/`.
+/// Git-injected `deleted` entries are repo-root absolute and can slip past a
+/// plain `strip_prefix` when the scan root is relative or verbatim
+/// (`\\?\`-prefixed, as `Path::canonicalize` yields on Windows while `git
+/// rev-parse` prints plain paths); the fallback chain ends at the file name
+/// so such entries still render as leaves.
+fn rel_path_for(path: &str, input_dir: &Path) -> String {
+    let p = Path::new(path);
+    let rel = p
+        .strip_prefix(input_dir)
+        .ok()
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            // Normalized string form: `/` separators, no Windows verbatim
+            // prefix, no trailing slash — compare prefixes textually.
+            let norm_p = path.replace('\\', "/");
+            let norm_p = norm_p.strip_prefix("//?/").unwrap_or(&norm_p);
+            let norm_dir = input_dir.display().to_string().replace('\\', "/");
+            let norm_dir = norm_dir.strip_prefix("//?/").unwrap_or(&norm_dir);
+            let norm_dir = norm_dir.trim_end_matches('/');
+            norm_p
+                .strip_prefix(norm_dir)
+                .and_then(|r| r.strip_prefix('/'))
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| p.file_name().map(PathBuf::from).unwrap_or_default());
+    rel.display().to_string().replace('\\', "/")
 }
 
 // -----------------------------------------------------------------------------
@@ -795,10 +816,12 @@ pub async fn api_check(
         .clone()
         .or_else(|| state.parser_override.clone())
         .unwrap_or_else(|| "standard".to_string());
-    let parser = state
-        .registry
-        .get(&parser_name)
-        .ok_or_else(|| ApiError::bad_request(format!("unknown parser '{parser_name}'")))?;
+    let parser = state.registry.get(&parser_name).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "unknown parser '{parser_name}'; available: {:?}",
+            state.registry.parser_names()
+        ))
+    })?;
     if !req.plugin_paths.is_empty() {
         return Err(ApiError::bad_request(
             "plugin_paths from HTTP requests are not accepted (CLI flag only)",
@@ -819,50 +842,22 @@ pub async fn api_check(
     }
 
     let started = Instant::now();
-    use tablec_core::core::config::find_excel_files;
-    let files = find_excel_files(
+    // One shared check pipeline (same as `tablec check`): enumerate → parse
+    // with the selected parser → validate per table → exactly one project
+    // validation over the complete table set, so cross-file `@ref` targets
+    // resolve and each project diagnostic is reported once.
+    let outcome = check_project(
         &input_path.to_string_lossy(),
         config.data.include.as_deref().unwrap_or(&[]),
         config.data.exclude.as_deref().unwrap_or(&[]),
+        parser.as_ref(),
     )
     .map_err(|e| ApiError::internal(format!("enumerate: {e}")))?;
 
-    let mut tables = Vec::new();
-    let mut diagnostics = Vec::new();
-    if files.is_empty() {
-        diagnostics.push(Diagnostic {
-            severity: tablec_core::core::diagnostic::Severity::Warning,
-            code: tablec_core::core::diagnostic::DiagnosticCode::Other,
-            message: format!(
-                "no spreadsheet files found under {} (include: {:?}, exclude: {:?})",
-                input_path.display(),
-                config.data.include.as_deref().unwrap_or(&[]),
-                config.data.exclude.as_deref().unwrap_or(&[]),
-            ),
-            location: tablec_core::core::diagnostic::SourceLocation::default(),
-        });
-    }
-    for f in &files {
-        match tablec_core::core::table::table::read_excel_with(
-            &f.to_string_lossy(),
-            parser.as_ref(),
-        ) {
-            Ok(mut t) => {
-                tables.append(&mut t);
-                // Belt-and-suspenders: also run cross-table `@ref` validation
-                // (which the CLI commands currently skip via `validate_all`).
-                if let Err(errs) = ConstraintValidator::validate_project(&tables) {
-                    diagnostics.extend(errs);
-                }
-            }
-            Err(errs) => diagnostics.extend(errs),
-        }
-    }
-
     Ok(Json(CheckResponse {
-        diagnostics,
+        diagnostics: outcome.diagnostics,
         duration_ms: started.elapsed().as_millis(),
-        sheets_checked: tables.len(),
+        sheets_checked: outcome.tables.len(),
     }))
 }
 
@@ -1005,6 +1000,11 @@ mod tests {
 
     #[tokio::test]
     async fn index_html_returns_html() {
+        if WEBUI_DIST.get_file("index.html").is_none() {
+            // Placeholder-only build (fresh checkout): run `pnpm build` first.
+            eprintln!("skipping: webui/dist has no build output; run `pnpm build`");
+            return;
+        }
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -1269,6 +1269,11 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_extensionless_path_falls_back_to_index_html() {
+        if WEBUI_DIST.get_file("index.html").is_none() {
+            // Placeholder-only build (fresh checkout): run `pnpm build` first.
+            eprintln!("skipping: webui/dist has no build output; run `pnpm build`");
+            return;
+        }
         let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
         let resp = app
             .oneshot(
@@ -1398,14 +1403,14 @@ mod tests {
         )
         .unwrap();
         let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        // serde_json::json! escapes the Windows path separators; a raw
+        // format!() would produce invalid JSON escapes (\U, \T, ...).
+        let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
         let req = Request::builder()
             .method("POST")
             .uri("/api/check")
             .header("content-type", "application/json")
-            .body(Body::from(format!(
-                r#"{{"dir":"{}"}}"#,
-                tmp.path().display()
-            )))
+            .body(Body::from(body))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -1425,14 +1430,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("readme.txt"), "not a spreadsheet").unwrap();
         let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        // serde_json::json! escapes the Windows path separators; a raw
+        // format!() would produce invalid JSON escapes (\U, \T, ...).
+        let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
         let req = Request::builder()
             .method("POST")
             .uri("/api/check")
             .header("content-type", "application/json")
-            .body(Body::from(format!(
-                r#"{{"dir":"{}"}}"#,
-                tmp.path().display()
-            )))
+            .body(Body::from(body))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -1526,6 +1531,239 @@ mod tests {
             !entries.is_empty(),
             "expected ≥1 file under {}",
             dir.display()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/files — recursive build-set listing
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn files_lists_nested_subdirectories_with_rel_paths() {
+        // Recursing include pattern: root + sub/ + sub/deep/ all appear, and
+        // every entry carries its input-dir-relative path with `/`
+        // separators. (The default `*.xlsx` include is root-only — glob `*`
+        // does not cross `/`, matching the build set exactly.)
+        let tmp = tempfile::tempdir().unwrap();
+        write_check_xlsx(
+            tmp.path(),
+            "a_root.xlsx",
+            "Root",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        let sub = tmp.path().join("sub");
+        let deep = sub.join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        write_check_xlsx(&sub, "b_sub.xlsx", "Sub", &[("id", "int", "")], &[&["1"]]);
+        write_check_xlsx(
+            &deep,
+            "c_deep.xlsx",
+            "Deep",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        // `/**/*.xlsx` is the dialect that recurses: `find_excel_files` turns
+        // it into `<input_dir>/**/*.xlsx` (a real `**` glob component), the
+        // same thing `tablec build` would see with this config.
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \".\"\ninclude = [\"/**/*.xlsx\"]\n\n[export]\nformat = \"json\"\noutput_dir = \"out\"\n",
+        )
+        .unwrap();
+
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        let mut rels: Vec<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
+        rels.sort();
+        assert_eq!(
+            rels,
+            vec!["a_root.xlsx", "sub/b_sub.xlsx", "sub/deep/c_deep.xlsx"],
+            "recursive entries with normalized rel_path, got {entries:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn files_honors_config_include_exclude() {
+        // tablec.toml include/exclude must shrink the listing to exactly the
+        // build set: the excluded drafts disappear even though they exist on
+        // disk (root and nested), while the keepers survive the same recurse.
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let tables = data.join("tables");
+        std::fs::create_dir_all(&tables).unwrap();
+        write_check_xlsx(
+            &data,
+            "keep_root.xlsx",
+            "K1",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        write_check_xlsx(
+            &tables,
+            "a_keep.xlsx",
+            "Keep",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        write_check_xlsx(
+            &data,
+            "draft_root.xlsx",
+            "D1",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        write_check_xlsx(
+            &tables,
+            "draft_b.xlsx",
+            "Draft",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+        std::fs::write(
+            tmp.path().join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \"data\"\ninclude = [\"/**/*.xlsx\"]\nexclude = [\"/**/draft_*.xlsx\"]\n\n[export]\nformat = \"json\"\noutput_dir = \"out\"\n",
+        )
+        .unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        let mut rels: Vec<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
+        rels.sort();
+        assert_eq!(
+            rels,
+            vec!["keep_root.xlsx", "tables/a_keep.xlsx"],
+            "exclude must win over include, got {rels:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn files_default_config_excludes_ods_and_csv() {
+        // The build path only ever accepted xlsx/xls — the listing now
+        // matches that exactly, so .ods/./.csv files in the scan dir stay
+        // invisible (the old direct-children scan showed them).
+        let tmp = tempfile::tempdir().unwrap();
+        write_check_xlsx(tmp.path(), "a.xlsx", "A", &[("id", "int", "")], &[&["1"]]);
+        std::fs::write(tmp.path().join("notes.csv"), "not,a,table\n").unwrap();
+        std::fs::write(tmp.path().join("b.ods"), "not really ods").unwrap();
+
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        let rels: Vec<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(rels, vec!["a.xlsx"], "got {entries:?}");
+    }
+
+    #[tokio::test]
+    async fn files_modified_filter_finds_nested_changed_file() {
+        if !have_git() {
+            return;
+        }
+        let fixture = fixture_xlsx();
+        if !fixture.exists() {
+            return;
+        }
+        // Repo with a committed nested spreadsheet (modified vs HEAD) and a
+        // tracked nested one deleted from disk — the modified filter must
+        // surface both with their rel_paths (the deleted file only exists in
+        // git, so this also proves the recursive git merge feeds the rail).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        for cfg in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            std::process::Command::new("git")
+                .args(["config", cfg[0], cfg[1]])
+                .current_dir(root)
+                .output()
+                .unwrap();
+        }
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::copy(&fixture, sub.join("basic.xlsx")).unwrap();
+        std::fs::copy(&fixture, sub.join("gone.xlsx")).unwrap();
+        std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        // Modify basic.xlsx (append bytes → git sees M), delete gone.xlsx.
+        let mut bytes = std::fs::read(sub.join("basic.xlsx")).unwrap();
+        bytes.push(0);
+        std::fs::write(sub.join("basic.xlsx"), bytes).unwrap();
+        std::fs::remove_file(sub.join("gone.xlsx")).unwrap();
+        // Recursing include so the nested files are in the scan set.
+        std::fs::write(
+            root.join("tablec.toml"),
+            "[project]\nname = \"t\"\n\n[data]\ninput_dir = \".\"\ninclude = [\"/**/*.xlsx\"]\n\n[export]\nformat = \"json\"\noutput_dir = \"out\"\n",
+        )
+        .unwrap();
+
+        let app = crate::router::router(make_state(root.to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/files?filter=modified")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let entries: Vec<FileEntry> = serde_json::from_slice(&body).unwrap();
+        let rels: Vec<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(
+            rels,
+            vec!["sub/basic.xlsx", "sub/gone.xlsx"],
+            "modified filter must return nested changed files (incl. git-injected deleted), got {entries:?}"
         );
     }
 
@@ -1915,6 +2153,161 @@ output_dir = "out"
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(v["diagnostics"].is_array());
         assert!(v["sheets_checked"].as_u64().unwrap() >= 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // /api/check — shared pipeline semantics
+    // -------------------------------------------------------------------------
+
+    /// Write an xlsx with the standard 5-row tablec layout.
+    fn write_check_xlsx(
+        dir: &std::path::Path,
+        name: &str,
+        sheet: &str,
+        columns: &[(&str, &str, &str)], // (name, type, constraint)
+        data: &[&[&str]],
+    ) {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(sheet).ok();
+        for (col, (field_name, ty, constraint)) in columns.iter().enumerate() {
+            let col = col as u16;
+            ws.write_string(0, col, *field_name).ok();
+            ws.write_string(1, col, *ty).ok();
+            ws.write_string(2, col, "").ok();
+            ws.write_string(3, col, *constraint).ok();
+            ws.write_string(4, col, "").ok();
+        }
+        for (row, cells) in data.iter().enumerate() {
+            for (col, cell) in cells.iter().enumerate() {
+                ws.write_string(5 + row as u32, col as u16, *cell).ok();
+            }
+        }
+        wb.save(dir.join(name)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn check_reports_cross_file_ref_exactly_once() {
+        // Drop (@ref Item.id) and Item live in different files. Project
+        // validation must run once over the complete table set: the violation
+        // appears exactly once, and `sheets_checked` counts both tables.
+        let tmp = tempfile::tempdir().unwrap();
+        write_check_xlsx(
+            tmp.path(),
+            "a_drop.xlsx",
+            "Drop",
+            &[("item_id", "int", "@ref(\"Item.id\")")],
+            &[&["99"]],
+        );
+        write_check_xlsx(
+            tmp.path(),
+            "b_items.xlsx",
+            "Item",
+            &[("id", "int", "")],
+            &[&["1"]],
+        );
+
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let diags = v["diagnostics"].as_array().unwrap();
+        let fk: Vec<&serde_json::Value> = diags
+            .iter()
+            .filter(|d| d["code"] == "ConstraintForeignKeyViolation")
+            .collect();
+        assert_eq!(
+            fk.len(),
+            1,
+            "cross-file @ref violation must appear exactly once, got: {diags:?}"
+        );
+        assert!(
+            fk[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("missing from target Item.id"),
+            "expected a FK violation against the found target, got: {fk:?}"
+        );
+        // sheets_checked = total tables parsed across all files.
+        assert_eq!(v["sheets_checked"].as_u64(), Some(2));
+        assert!(v["duration_ms"].is_number());
+    }
+
+    #[tokio::test]
+    async fn check_cross_file_ref_resolves_across_files() {
+        // Same shape as above but valid data: the host value exists in the
+        // other file, so the shared pipeline must come back clean.
+        let tmp = tempfile::tempdir().unwrap();
+        write_check_xlsx(
+            tmp.path(),
+            "a_drop.xlsx",
+            "Drop",
+            &[("item_id", "int", "@ref(\"Item.id\")")],
+            &[&["1"]],
+        );
+        write_check_xlsx(
+            tmp.path(),
+            "b_items.xlsx",
+            "Item",
+            &[("id", "int", "")],
+            &[&["1"], &["2"]],
+        );
+
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let body = serde_json::json!({ "dir": tmp.path().display().to_string() }).to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            v["diagnostics"].as_array().unwrap().len(),
+            0,
+            "valid cross-file @ref must not produce diagnostics: {v}"
+        );
+        assert_eq!(v["sheets_checked"].as_u64(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn check_rejects_unknown_parser_naming_available() {
+        let app = crate::router::router(make_state(std::path::PathBuf::from(".")));
+        let body = serde_json::json!({ "dir": ".", "parser": "does-not-exist" }).to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), 4 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let msg = v["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("does-not-exist"), "got: {msg}");
+        assert!(
+            msg.contains("standard"),
+            "must name available parsers: {msg}"
+        );
     }
 
     // -------------------------------------------------------------------------

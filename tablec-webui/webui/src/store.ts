@@ -11,6 +11,8 @@ import type { ReactiveController, ReactiveControllerHost } from 'lit';
 export interface FileEntry {
   name: string;
   path: string;
+  /** Path relative to the resolved input dir, separators normalized to `/`. */
+  rel_path: string;
   size: number;
   modified_secs: number;
   /** Git change status vs current branch HEAD: modified|added|untracked|deleted|clean */
@@ -26,6 +28,156 @@ export type FilesFilter = 'all' | 'modified';
 /** True when a file status counts as "changed" for the Modified-only filter. */
 export function isChangedStatus(s?: FileStatus): boolean {
   return !!s && s !== 'clean';
+}
+
+/** Check-pipeline problem counts for one file (from /api/check diagnostics). */
+export interface FileDiagnostics {
+  errors: number;
+  warnings: number;
+}
+
+/** Rail sort factor: file name, modification time, or error count. */
+export type SortFactor = 'name' | 'modified' | 'errors';
+
+/** One directory node of the file-rail tree (the virtual root has path ''). */
+export interface TreeDir {
+  /** Display name: last path segment ('' for the virtual root). */
+  name: string;
+  /** Full relative directory path ('' for the virtual root). */
+  path: string;
+  /** Subdirectories, in insertion order (sorted at render time). */
+  dirs: TreeDir[];
+  /** Files directly in this directory, in insertion order. */
+  files: FileEntry[];
+  /** Direct files in this directory. */
+  fileCount: number;
+  /** Files contained in this whole subtree (incl. nested directories). */
+  totalFiles: number;
+  /** Latest modification time in this subtree (0 when unknown). */
+  latestModified: number;
+  /** Aggregated check problems over this subtree. */
+  errorCount: number;
+  warningCount: number;
+}
+
+/** `rel_path` normalized to `/` separators (defensive: backend already does). */
+export function relPathOf(f: FileEntry): string {
+  return (f.rel_path || f.name).replace(/\\/g, '/');
+}
+
+/**
+ * Derive a directory trie from the flat listing: split each entry's
+ * `rel_path` on `/`, fold into directories, and aggregate per-directory
+ * counts (file totals, latest mtime, check problems) bottom-up.
+ */
+export function buildTree(files: FileEntry[], diags: Map<string, FileDiagnostics>): TreeDir {
+  const mkDir = (name: string, path: string): TreeDir => ({
+    name,
+    path,
+    dirs: [],
+    files: [],
+    fileCount: 0,
+    totalFiles: 0,
+    latestModified: 0,
+    errorCount: 0,
+    warningCount: 0,
+  });
+  const root = mkDir('', '');
+  const index = new Map<string, TreeDir>([['', root]]);
+  const ensureDir = (dirPath: string): TreeDir => {
+    const existing = index.get(dirPath);
+    if (existing) return existing;
+    const sep = dirPath.lastIndexOf('/');
+    const parent = ensureDir(sep === -1 ? '' : dirPath.slice(0, sep));
+    const dir = mkDir(dirPath.slice(sep + 1), dirPath);
+    parent.dirs.push(dir);
+    index.set(dirPath, dir);
+    return dir;
+  };
+  for (const f of files) {
+    const rel = relPathOf(f);
+    const sep = rel.lastIndexOf('/');
+    ensureDir(sep === -1 ? '' : rel.slice(0, sep)).files.push(f);
+  }
+  const aggregate = (d: TreeDir): void => {
+    let total = d.files.length;
+    let latest = 0;
+    let errors = 0;
+    let warnings = 0;
+    for (const f of d.files) {
+      latest = Math.max(latest, f.modified_secs || 0);
+      const c = diags.get(relPathOf(f));
+      if (c) {
+        errors += c.errors;
+        warnings += c.warnings;
+      }
+    }
+    for (const child of d.dirs) {
+      aggregate(child);
+      total += child.totalFiles;
+      latest = Math.max(latest, child.latestModified);
+      errors += child.errorCount;
+      warnings += child.warningCount;
+    }
+    d.fileCount = d.files.length;
+    d.totalFiles = total;
+    d.latestModified = latest;
+    d.errorCount = errors;
+    d.warningCount = warnings;
+  };
+  aggregate(root);
+  return root;
+}
+
+/**
+ * Sort a tree in place by the rail's sort factor. Files order within their
+ * directory; directories order by the matching aggregate (name →
+ * alphabetical, modified → latest contained mtime, errors → total contained
+ * errors with warnings as tiebreak). Missing check counts compare as zero,
+ * so error-ordering degrades to name order when no check results exist
+ * (name is the final tiebreak everywhere, keeping the order deterministic).
+ */
+export function sortTree(root: TreeDir, factor: SortFactor, asc: boolean): void {
+  const dir = (n: number): number => (asc ? n : -n);
+  const byName = (a: { name: string }, b: { name: string }): number =>
+    a.name.localeCompare(b.name);
+  const fileHealth = (f: FileEntry): FileDiagnostics =>
+    store.diagnosticsByFile.get(relPathOf(f)) ?? { errors: 0, warnings: 0 };
+
+  const cmpFiles = (a: FileEntry, b: FileEntry): number => {
+    switch (factor) {
+      case 'modified':
+        return dir((a.modified_secs || 0) - (b.modified_secs || 0)) || byName(a, b);
+      case 'errors': {
+        const ka = fileHealth(a);
+        const kb = fileHealth(b);
+        return dir(ka.errors - kb.errors) || dir(ka.warnings - kb.warnings) || byName(a, b);
+      }
+      default:
+        return dir(byName(a, b));
+    }
+  };
+  const cmpDirs = (a: TreeDir, b: TreeDir): number => {
+    switch (factor) {
+      case 'modified':
+        return dir(a.latestModified - b.latestModified) || byName(a, b);
+      case 'errors':
+        return (
+          dir(a.errorCount - b.errorCount) ||
+          dir(a.warningCount - b.warningCount) ||
+          byName(a, b)
+        );
+      default:
+        return dir(byName(a, b));
+    }
+  };
+
+  const walk = (d: TreeDir): void => {
+    d.files.sort(cmpFiles);
+    d.dirs.sort(cmpDirs);
+    for (const c of d.dirs) walk(c);
+  };
+  walk(root);
 }
 
 export interface SheetInfo {
@@ -151,6 +303,21 @@ export interface AppStore {
   previewMode: 'parsed' | 'raw';
   /** Left-menu filter: show all files, or only files with git changes. */
   filesFilter: FilesFilter;
+  /**
+   * Directory paths (rel_path form, `/` separators) the user explicitly
+   * collapsed. A directory NOT in the set renders expanded — so freshly
+   * appearing directories default to open, matching the old flat "everything
+   * visible" behavior. Re-fetches replace `files` but never this set, which
+   * is what makes expansion survive reloads and live refreshes.
+   */
+  expandedDirs: Set<string>;
+  /** Per-file check results keyed by rel_path ('/' separators). */
+  diagnosticsByFile: Map<string, FileDiagnostics>;
+  /** True while the post-listing /api/check is in flight. */
+  checkRunning: boolean;
+  /** Rail sort: factor + direction (default name ascending). */
+  sortFactor: SortFactor;
+  sortAsc: boolean;
   busy: boolean;
   lastResult: ActionResult | null;
 }
@@ -170,6 +337,11 @@ export const store: AppStore = {
   configPath: null,
   previewMode: 'parsed',
   filesFilter: 'all',
+  expandedDirs: new Set<string>(),
+  diagnosticsByFile: new Map<string, FileDiagnostics>(),
+  checkRunning: false,
+  sortFactor: 'name',
+  sortAsc: true,
   busy: false,
   lastResult: null,
 };
