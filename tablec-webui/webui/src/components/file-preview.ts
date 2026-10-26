@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 
 import { baseName, cellClass, cellClassTyped, colLetter, typeNameOf } from '../format.js';
-import { StoreSub, notify, store } from '../store.js';
+import { StoreSub, notify, sidesQuery, store, SIDES_CHANGED_EVENT } from '../store.js';
 import type { ParsedCell, ParsedPreview, RawGrid, SheetInfo } from '../store.js';
 import { getJson } from '../api.js';
 
@@ -348,7 +348,18 @@ export class FilePreview extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.addEventListener('keydown', this._onKey);
+    document.addEventListener(SIDES_CHANGED_EVENT, this._onSidesChanged);
   }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener(SIDES_CHANGED_EVENT, this._onSidesChanged);
+  }
+
+  /** Comparison sides changed → reload the current file against them. */
+  _onSidesChanged = () => {
+    if (store.selectedPath) void this._loadFor(store.selectedPath);
+  };
 
   render(): TemplateResult {
     const { selectedPath, sheets, activeSheet, parsed, preview, selectedCell, previewMode } = store;
@@ -610,7 +621,9 @@ export class FilePreview extends LitElement {
     store.selectedCell = null;
     notify();
     try {
-      const sheets = await getJson<SheetInfo[]>(`/api/sheets?path=${encodeURIComponent(path)}`);
+      const sheets = await getJson<SheetInfo[]>(
+        `/api/sheets?path=${encodeURIComponent(path)}${sidesQuery()}`,
+      );
       store.sheets = sheets;
       if (sheets.length) {
         store.activeSheet = sheets[0].name;
@@ -637,7 +650,7 @@ export class FilePreview extends LitElement {
         `/api/parsed_preview?path=${encodeURIComponent(store.selectedPath)}` +
         `&sheet=${encodeURIComponent(store.activeSheet)}` +
         `&parser=${encodeURIComponent(store.activeParser)}` +
-        `&max_rows=120`,
+        `&max_rows=120${sidesQuery()}`,
       );
       store.parsed = pp;
       if (pp.rows?.length && !store.selectedCell) {
@@ -655,7 +668,7 @@ export class FilePreview extends LitElement {
     try {
       const grid = await getJson<RawGrid>(
         `/api/preview?path=${encodeURIComponent(store.selectedPath)}` +
-        `&sheet=${encodeURIComponent(store.activeSheet)}&max_rows=120`,
+        `&sheet=${encodeURIComponent(store.activeSheet)}&max_rows=120${sidesQuery()}`,
       );
       store.preview = grid;
       notify();

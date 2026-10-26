@@ -10,6 +10,7 @@ import './file-list.js';
 import './file-preview.js';
 import './build-panel.js';
 import './status-bar.js';
+import './compare-bar.js';
 
 // <app-shell> — top-level layout: header · main grid · footer.
 export class AppShell extends LitElement {
@@ -127,6 +128,7 @@ export class AppShell extends LitElement {
         <span class="dir-display" title=${s.dir}>
           <span class="prefix">~/</span><span class="path">${s.dir}</span>
         </span>
+        <compare-bar></compare-bar>
         <span class="meta">
           <span>parser <b>${s.activeParser}</b></span>
           <span>cfg <b>${s.configPath ?? '(default)'}</b></span>
