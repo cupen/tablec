@@ -37,6 +37,7 @@ pub fn router(state: Arc<WebuiState>) -> Router {
         .route("/api/health", get(handlers::api_health))
         .route("/api/state", get(handlers::api_state))
         .route("/api/files", get(handlers::api_files))
+        .route("/api/branches", get(handlers::api_branches))
         .route("/api/sheets", get(handlers::api_sheets))
         .route("/api/preview", get(handlers::api_preview))
         .route("/api/parsed_preview", get(handlers::api_parsed_preview))
