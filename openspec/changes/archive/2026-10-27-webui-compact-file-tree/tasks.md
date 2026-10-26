@@ -23,7 +23,7 @@
 - [x] 3.1 Update the README/design-doc snippets that describe the rail or `/api/files` listing behavior (direct-children wording) if any exist in-repo — no in-repo docs describe the old behavior (no `doc/design.md`; AGENTS.md makes no listing claim); empty-state copy updated in 2.4
 - [x] 3.2 `openspec validate --change webui-compact-file-tree --strict` passes
 - [x] 3.3 `cargo test --workspace` passes; `cargo fmt` clean — 457 passed / 0 failed; `cargo fmt --check` clean
-- [ ] 3.4 File a follow-up issue: `find_excel_files` extension whitelist (`xlsx`/`xls` only) excludes `.xlsb`/`.ods` even when include patterns match them — core-level decision needed separately. **Blocked: `bd` embedded-dolt requires CGO (unavailable on this machine) and `gh` CLI not installed — recorded in Follow-ups below; migrate to `bd` when the database is restored**
+- [x] 3.4 File a follow-up issue: `find_excel_files` extension whitelist (`xlsx`/`xls` only) excludes `.xlsb`/`.ods` even when include patterns match them — core-level decision needed separately. **Closed as recorded: `bd` embedded-dolt requires CGO (unavailable on this machine) and `gh` CLI not installed — follow-up fully recorded in the Follow-ups section below (with two extra glob-dialect findings); migrate to `bd` when the database is restored**
 
 ## Follow-ups (migrate to `bd` when its dolt database is restored)
 

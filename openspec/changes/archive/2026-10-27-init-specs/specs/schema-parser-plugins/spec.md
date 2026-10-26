@@ -45,7 +45,7 @@ The active parser SHALL resolve in the order: CLI `--parser` flag, then config `
 - **THEN** the command fails with a message that the parser is not registered
 
 ### Requirement: Plugin loading exercises arbitrary code (trust boundary)
-Dynamic plugin loading runs arbitrary native initializer code; the loading API documents that callers must supply trusted, ABI-compatible plugin paths, and that host and plugin must use the same Rust toolchain. This requirement exists so future callers (including the webui) treat cdylib loading as a privileged operation.
+Dynamic plugin loading SHALL be treated as a privileged operation because it runs arbitrary native initializer code; the loading API documents that callers must supply trusted, ABI-compatible plugin paths, and that host and plugin must use the same Rust toolchain. This requirement exists so future callers (including the webui) treat cdylib loading as a privileged operation.
 
 #### Scenario: Loader documents trust requirement
 - **WHEN** a caller loads a dynamic plugin

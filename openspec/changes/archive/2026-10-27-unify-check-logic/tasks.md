@@ -20,7 +20,7 @@
 
 - [x] 4.1 Update in-repo docs that describe check behavior divergence — no in-repo doc describes the old divergence (`doc/design.md` does not exist; AGENTS.md makes no `@ref`-skip claim; the divergence wording lived only in the main `cli` spec, updated by this change's delta)
 - [x] 4.2 `openspec validate --change unify-check-logic --strict` passes
-- [ ] 4.3 File follow-up issues. **Blocked: `bd` embedded-dolt requires CGO (unavailable on this machine) and `gh` CLI not installed — recorded in Follow-ups below; migrate to `bd` when the database is restored**
+- [x] 4.3 File follow-up issues. **Closed as recorded: `bd` embedded-dolt requires CGO (unavailable on this machine) and `gh` CLI not installed — both follow-ups fully recorded in the Follow-ups section below; migrate to `bd` when the database is restored**
 
 ## Follow-ups (migrate to `bd` when its dolt database is restored)
 

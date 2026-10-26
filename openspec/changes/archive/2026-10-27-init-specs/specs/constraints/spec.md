@@ -42,7 +42,7 @@ A constraint cell MUST start with `@`, contain a function name, and any argument
 - **THEN** validation fails with an error and produces a diagnostic
 
 ### Requirement: @oneof
-`@oneof(v1, v2, ...)` requires each cell to match one of the allowed values. Values that parse as `i64` go into a numeric bucket and are compared against numeric cells; all other values are treated as strings and compared against string cells. A cell that matches neither bucket produces `ConstraintNotInSet`.
+The `@oneof(v1, v2, ...)` constraint SHALL require each cell to match one of the allowed values. Values that parse as `i64` go into a numeric bucket and are compared against numeric cells; all other values are treated as strings and compared against string cells. A cell that matches neither bucket produces `ConstraintNotInSet`.
 
 #### Scenario: String enum matches
 - **WHEN** a field declared `@oneof(red, green, blue)` holds `green`
