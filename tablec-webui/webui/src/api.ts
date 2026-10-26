@@ -1,6 +1,6 @@
 // Typed fetch helpers + the /api/state bootstrap.
 
-import { notify, store } from './store.js';
+import { notify, sidesQuery, store } from './store.js';
 import type {
   Diagnostic,
   FileDiagnostics,
@@ -10,7 +10,18 @@ import type {
 
 export async function getJson<T = unknown>(url: string): Promise<T> {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  if (!r.ok) {
+    // Surface the server's message (e.g. "unknown comparison ref 'x'") so
+    // the UI can show WHY a request failed, not just that it did.
+    let message = `HTTP ${r.status} for ${url}`;
+    try {
+      const body = (await r.json()) as { message?: string };
+      if (body?.message) message = body.message;
+    } catch {
+      /* non-JSON error body → keep the status line */
+    }
+    throw new Error(message);
+  }
   return r.json() as Promise<T>;
 }
 
@@ -39,7 +50,7 @@ interface CheckResponse {
   sheets_checked?: number;
 }
 
-/** Bootstrap / reload: server state first, then the file list. */
+/** Bootstrap / reload: server state + branches, then the file list. */
 export async function refreshState(): Promise<void> {
   try {
     const s = await getJson<StateBody>('/api/state');
@@ -52,18 +63,48 @@ export async function refreshState(): Promise<void> {
   } catch (e) {
     console.error('refreshState', e);
   }
+  // Comparison-selector data; empty outside a repo (the payload carries a
+  // warning we deliberately don't surface — the selector stays usable).
+  try {
+    const b = await getJson<{ branches?: string[]; warning?: string }>('/api/branches');
+    store.branches = b.branches ?? [];
+    notify();
+  } catch (e) {
+    console.error('branches', e);
+  }
   try {
     const filter = store.filesFilter === 'modified' ? '&filter=modified' : '';
     const files = await getJson<FileEntry[]>(
-      `/api/files?dir=${encodeURIComponent(store.dir)}${filter}`,
+      `/api/files?dir=${encodeURIComponent(store.dir)}${filter}${sidesQuery()}`,
     );
     store.files = files;
+    store.diffError = null;
     notify();
     // The listing changed (initial load, reload button, live refresh, filter
     // switch) — its health badges come from a fresh check.
     scheduleCheck();
   } catch (e) {
-    console.error('files', e);
+    // A sides-bearing listing failure (e.g. unknown ref) is shown in the
+    // compare bar rather than only the console.
+    store.diffError = e instanceof Error ? e.message : String(e);
+    notify();
+  }
+}
+
+/** Refetch only the file list (sides/filters may have changed). */
+export async function refetchFiles(): Promise<void> {
+  try {
+    const filter = store.filesFilter === 'modified' ? '&filter=modified' : '';
+    const files = await getJson<FileEntry[]>(
+      `/api/files?dir=${encodeURIComponent(store.dir)}${filter}${sidesQuery()}`,
+    );
+    store.files = files;
+    store.diffError = null;
+    notify();
+    scheduleCheck();
+  } catch (e) {
+    store.diffError = e instanceof Error ? e.message : String(e);
+    notify();
   }
 }
 

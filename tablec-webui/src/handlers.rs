@@ -193,6 +193,112 @@ impl From<serde_json::Error> for ApiError {
 }
 
 // -----------------------------------------------------------------------------
+// Comparison sides — `left` / `right` query params shared by the file and
+// preview endpoints. Defaults (`worktree` vs `HEAD`) reproduce the classic
+// working-tree-vs-HEAD behavior; any other pair compares the two refs'
+// content directly (left's change relative to right).
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Sides {
+    left: crate::git::Side,
+    right: crate::git::Side,
+}
+
+fn parse_sides(left: Option<&str>, right: Option<&str>) -> Result<Sides, ApiError> {
+    let left = left
+        .map(crate::git::Side::parse)
+        .unwrap_or(crate::git::Side::Worktree);
+    let right = right
+        .map(crate::git::Side::parse)
+        .unwrap_or(crate::git::Side::Ref("HEAD".to_string()));
+    if right.is_worktree() {
+        return Err(ApiError::bad_request(
+            "'worktree' is only valid as the left comparison side",
+        ));
+    }
+    Ok(Sides { left, right })
+}
+
+fn is_default_sides(s: &Sides) -> bool {
+    s.left.is_worktree() && matches!(&s.right, crate::git::Side::Ref(r) if r == "HEAD")
+}
+
+/// Which bytes back a preview: the left side's content when the file exists
+/// there, else the right side's blob (file absent on the left — the
+/// "deleted" case). `Ok(None)` = no version on either side.
+enum BodySource {
+    Disk(PathBuf),
+    Temp(crate::git::sheet_diff::HeadTemp),
+}
+
+impl BodySource {
+    fn path(&self) -> &Path {
+        match self {
+            BodySource::Disk(p) => p,
+            BodySource::Temp(t) => t.path(),
+        }
+    }
+}
+
+fn resolve_side_or_400(
+    baseline: &crate::git::Baseline,
+    side: &crate::git::Side,
+) -> Result<String, ApiError> {
+    match crate::git::resolve_side(baseline, side) {
+        Ok(Some(sha)) => Ok(sha),
+        Ok(None) => Err(ApiError::bad_request(
+            "'worktree' is only valid as the left comparison side",
+        )),
+        Err(crate::git::GitError::UnknownRef(r)) => Err(ApiError::bad_request(format!(
+            "unknown comparison ref '{r}'"
+        ))),
+        Err(e) => Err(ApiError::internal(format!("git: {e}"))),
+    }
+}
+
+fn resolve_body_source(path: &Path, sides: &Sides) -> Result<Option<(BodySource, bool)>, ApiError> {
+    // Fast path: left is the worktree and the file is on disk.
+    if sides.left.is_worktree() && path.exists() {
+        return Ok(Some((BodySource::Disk(path.to_path_buf()), false)));
+    }
+    let parent = path.parent().unwrap_or(Path::new("."));
+    // Baseline resolution failing here (missing git, unreadable cwd) means we
+    // cannot locate ANY version of the file — the not-found answer, not a 500.
+    let baseline = crate::git::resolve_baseline(parent)
+        .ok()
+        .flatten()
+        .ok_or_else(|| ApiError::not_found(format!("file not found: {}", path.display())))?;
+    let repo_rel = path
+        .strip_prefix(&baseline.repo_root)
+        .map_err(|_| {
+            ApiError::not_found(format!("file outside repository: {}", path.display()))
+        })?
+        .to_path_buf();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_else(|| ".xlsx".to_string());
+    // Left is a ref: preview its blob when it has one.
+    if let crate::git::Side::Ref(_) = &sides.left {
+        let sha = resolve_side_or_400(&baseline, &sides.left)?;
+        if let Some(t) =
+            crate::git::sheet_diff::materialize_ref(&baseline, &sha, &repo_rel, &ext)
+                .map_err(|e| ApiError::internal(format!("git: {e}")))?
+        {
+            return Ok(Some((BodySource::Temp(t), false)));
+        }
+    }
+    // Absent on the left → the right side's blob is the body (all-deleted).
+    let right_sha = resolve_side_or_400(&baseline, &sides.right)?;
+    Ok(
+        crate::git::sheet_diff::materialize_ref(&baseline, &right_sha, &repo_rel, &ext)
+            .map_err(|e| ApiError::internal(format!("git: {e}")))?
+            .map(|t| (BodySource::Temp(t), true)),
+    )
+}
+
+// -----------------------------------------------------------------------------
 // GET /api/health
 // -----------------------------------------------------------------------------
 
@@ -282,6 +388,12 @@ pub struct FilesQuery {
     /// returned (the left-menu "Modified only" filter).
     #[serde(default)]
     pub filter: Option<String>,
+    /// Comparison sides (see [`parse_sides`]): `left` = `worktree` or a ref,
+    /// `right` = a ref. Defaults `worktree` / `HEAD`.
+    #[serde(default)]
+    pub left: Option<String>,
+    #[serde(default)]
+    pub right: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -318,6 +430,7 @@ pub async fn api_files(
     State(state): State<Arc<WebuiState>>,
     Query(q): Query<FilesQuery>,
 ) -> Result<Json<Vec<FileEntry>>, ApiError> {
+    let sides = parse_sides(q.left.as_deref(), q.right.as_deref())?;
     let dir = q
         .dir
         .as_deref()
@@ -349,22 +462,38 @@ pub async fn api_files(
     .map_err(|e| ApiError::internal(format!("failed to enumerate input files: {e}")))?;
     paths.sort();
 
-    // Git diff status: compare against the repository's current branch HEAD.
-    // `file_statuses` already includes `deleted` files (tracked at HEAD but
-    // missing from the worktree) that the scanner can't see. Failures (not a
-    // repo, no HEAD, missing `git`) degrade to clean rather than erroring.
-    let statuses: Vec<crate::git::FileWithStatus> = crate::git::file_statuses(&input_dir, &paths)
-        .unwrap_or_else(|_| {
-            paths
-                .iter()
-                .map(|p| crate::git::FileWithStatus {
-                    path: p.display().to_string(),
-                    status: crate::git::FileStatus::Clean,
-                    numstat_added: 0,
-                    numstat_deleted: 0,
-                })
-                .collect()
-        });
+    // Git diff status against the selected comparison sides. The default
+    // pair keeps the classic porcelain path (staged/untracked distinction);
+    // any other pair classifies the union of both sides' trees. Failures
+    // (not a repo, no HEAD, missing `git`) degrade to clean rather than
+    // erroring — an unresolvable ref is the exception (400, named).
+    let statuses_result = if is_default_sides(&sides) {
+        crate::git::file_statuses(&input_dir, &paths)
+    } else {
+        crate::git::file_statuses_sides(
+            &input_dir,
+            &paths,
+            &sides.left,
+            &sides.right,
+            config.config.data.include.as_deref().unwrap_or(&[]),
+            config.config.data.exclude.as_deref().unwrap_or(&[]),
+        )
+    };
+    let statuses: Vec<crate::git::FileWithStatus> = match statuses_result {
+        Ok(v) => v,
+        Err(crate::git::GitError::UnknownRef(r)) => {
+            return Err(ApiError::bad_request(format!("unknown comparison ref '{r}'")))
+        }
+        Err(_) => paths
+            .iter()
+            .map(|p| crate::git::FileWithStatus {
+                path: p.display().to_string(),
+                status: crate::git::FileStatus::Clean,
+                numstat_added: 0,
+                numstat_deleted: 0,
+            })
+            .collect(),
+    };
 
     let meta_by_path: std::collections::HashMap<String, (u64, i64)> = paths
         .iter()
@@ -446,17 +575,22 @@ fn rel_path_for(path: &str, input_dir: &Path) -> String {
 #[derive(Deserialize)]
 pub struct SheetsQuery {
     pub path: String,
+    #[serde(default)]
+    pub left: Option<String>,
+    #[serde(default)]
+    pub right: Option<String>,
 }
 
 pub async fn api_sheets(Query(q): Query<SheetsQuery>) -> Result<Json<Vec<SheetInfo>>, ApiError> {
     let p = PathBuf::from(&q.path);
-    if !p.exists() {
+    let sides = parse_sides(q.left.as_deref(), q.right.as_deref())?;
+    let Some((src, _)) = resolve_body_source(&p, &sides)? else {
         return Err(ApiError::not_found(format!(
-            "file not found: {}",
+            "file not found on either side: {}",
             p.display()
         )));
-    }
-    let sheets = excel::list_sheets(&p)?;
+    };
+    let sheets = excel::list_sheets(src.path())?;
     Ok(Json(sheets))
 }
 
@@ -470,18 +604,23 @@ pub struct PreviewQuery {
     pub sheet: String,
     #[serde(default)]
     pub max_rows: Option<usize>,
+    #[serde(default)]
+    pub left: Option<String>,
+    #[serde(default)]
+    pub right: Option<String>,
 }
 
 pub async fn api_preview(Query(q): Query<PreviewQuery>) -> Result<Json<Grid>, ApiError> {
     let p = PathBuf::from(&q.path);
-    if !p.exists() {
+    let sides = parse_sides(q.left.as_deref(), q.right.as_deref())?;
+    let Some((src, _)) = resolve_body_source(&p, &sides)? else {
         return Err(ApiError::not_found(format!(
-            "file not found: {}",
+            "file not found on either side: {}",
             p.display()
         )));
-    }
+    };
     let max = q.max_rows.unwrap_or(100).clamp(5, 1000);
-    let grid = excel::preview_sheet(&p, &q.sheet, max)?;
+    let grid = excel::preview_sheet(src.path(), &q.sheet, max)?;
     Ok(Json(grid))
 }
 
@@ -501,6 +640,10 @@ pub struct ParsedPreviewQuery {
     pub parser: Option<String>,
     #[serde(default)]
     pub max_rows: Option<usize>,
+    #[serde(default)]
+    pub left: Option<String>,
+    #[serde(default)]
+    pub right: Option<String>,
 }
 
 pub async fn api_parsed_preview(
@@ -508,15 +651,16 @@ pub async fn api_parsed_preview(
     Query(q): Query<ParsedPreviewQuery>,
 ) -> Result<Json<excel::ParsedPreview>, ApiError> {
     let p = PathBuf::from(&q.path);
-    if !p.exists() {
+    let sides = parse_sides(q.left.as_deref(), q.right.as_deref())?;
+    let Some((src, from_right)) = resolve_body_source(&p, &sides)? else {
         return Err(ApiError::not_found(format!(
-            "file not found: {}",
+            "file not found on either side: {}",
             p.display()
         )));
-    }
+    };
     let parser_name = q.parser.clone().unwrap_or_else(|| "standard".to_string());
     let max = q.max_rows.unwrap_or(120).clamp(1, 1000);
-    let pp = match excel::parsed_preview(&p, &q.sheet, &parser_name, &state.registry, max) {
+    let pp = match excel::parsed_preview(src.path(), &q.sheet, &parser_name, &state.registry, max) {
         Ok(pp) => pp,
         Err(excel::ParsedPreviewError::UnknownParser { name, available }) => {
             return Err(ApiError::bad_request(format!(
@@ -525,19 +669,74 @@ pub async fn api_parsed_preview(
         }
         Err(excel::ParsedPreviewError::Excel(e)) => return Err(ApiError::from(e)),
     };
-    // Compute per-cell diff against the git baseline (additive: when no
+    // Compute per-cell diff against the selected sides (additive: when no
     // baseline exists or the diff fails, the preview is returned unchanged).
-    // Clone so a git failure can still serve the un-diffed preview.
+    // Clone so a git failure can still serve the un-diffed preview. The
+    // default pair over an on-disk file keeps the classic worktree-vs-HEAD
+    // code path; everything else (a ref side, or a file absent from the
+    // worktree) goes through the two-side diff.
     let pp = match state.registry.get(&parser_name) {
         Some(parser) => {
-            match crate::git::sheet_diff::diff_preview(pp.clone(), &p, &q.sheet, parser.as_ref()) {
-                Ok((diffed, _)) => diffed,
-                Err(_) => pp,
+            if is_default_sides(&sides) && matches!(src, BodySource::Disk(_)) {
+                match crate::git::sheet_diff::diff_preview(
+                    pp.clone(),
+                    src.path(),
+                    &q.sheet,
+                    parser.as_ref(),
+                ) {
+                    Ok((diffed, _)) => diffed,
+                    Err(_) => pp,
+                }
+            } else {
+                diff_preview_generic(pp, from_right, &p, &sides, &q.sheet, parser.as_ref())
             }
         }
         None => pp,
     };
     Ok(Json(pp))
+}
+
+/// Two-side cell diff used when the comparison is not the default pair (or
+/// the preview body had to be materialized). Degrades to the un-diffed body
+/// on any git failure, exactly like the classic path.
+fn diff_preview_generic(
+    body: excel::ParsedPreview,
+    from_right: bool,
+    path: &Path,
+    sides: &Sides,
+    sheet: &str,
+    parser: &dyn tablec_core::core::schema::SchemaParser,
+) -> excel::ParsedPreview {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let baseline = match crate::git::resolve_baseline(parent) {
+        Ok(Some(b)) => b,
+        _ => return body,
+    };
+    let Ok(repo_rel) = path.strip_prefix(&baseline.repo_root) else {
+        return body;
+    };
+    let fallback = body.clone();
+    match crate::git::sheet_diff::diff_preview_sides(
+        body,
+        from_right,
+        &baseline,
+        repo_rel,
+        sheet,
+        parser,
+        &sides.right,
+    ) {
+        Ok((diffed, _)) => diffed,
+        Err(_) => fallback,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// GET /api/branches — comparison-selector data: local + remote-tracking
+// branch names (deduped, local wins). Degrades to empty + warning.
+// -----------------------------------------------------------------------------
+
+pub async fn api_branches(State(state): State<Arc<WebuiState>>) -> Json<crate::git::BranchListing> {
+    Json(crate::git::branches(&state.dir))
 }
 
 // -----------------------------------------------------------------------------
@@ -947,6 +1146,306 @@ mod tests {
         let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         crate_dir.join("../tablec-core/tests/fixtures/testdata/basic_table.xlsx")
     }
+
+    // ---- comparison sides (left/right) ----
+
+    fn git_in(root: &std::path::Path, args: &[&str]) {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+    }
+
+    /// Repo with `main` (a.xlsx "v1", c.xlsx) and `feature` (a.xlsx modified,
+    /// b.xlsx added, c.xlsx removed). HEAD ends on `main`.
+    fn sides_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        git_in(&root, &["config", "user.email", "t@e.com"]);
+        git_in(&root, &["config", "user.name", "T"]);
+        std::fs::write(root.join("a.xlsx"), "v1\n").unwrap();
+        std::fs::write(root.join("c.xlsx"), "c\n").unwrap();
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "init"]);
+        git_in(&root, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(root.join("a.xlsx"), "v1\nline2\n").unwrap();
+        std::fs::write(root.join("b.xlsx"), "b\n").unwrap();
+        std::fs::remove_file(root.join("c.xlsx")).unwrap();
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "feature"]);
+        git_in(&root, &["checkout", "-q", "main"]);
+        (dir, root)
+    }
+
+    async fn get_json_body(resp: axum::response::Response) -> (StatusCode, serde_json::Value) {
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let v = if body.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null)
+        };
+        (status, v)
+    }
+
+    #[tokio::test]
+    async fn branches_lists_local_and_degrades_outside_repo() {
+        if !have_git() {
+            return;
+        }
+        let (_dir, root) = sides_repo();
+        let app = crate::router::router(make_state(root.clone()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/branches")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, v) = get_json_body(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["branches"], serde_json::json!(["feature", "main"]));
+        assert!(v.get("warning").is_none());
+
+        let tmp = tempfile::tempdir().unwrap();
+        let app = crate::router::router(make_state(tmp.path().to_path_buf()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/branches")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, v) = get_json_body(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["branches"], serde_json::json!([]));
+        assert!(v["warning"].is_string());
+    }
+
+    #[tokio::test]
+    async fn files_with_left_right_compares_branches() {
+        if !have_git() {
+            return;
+        }
+        let (_dir, root) = sides_repo();
+        let app = crate::router::router(make_state(root.clone()));
+        let url = format!(
+            "/api/files?dir={}&left=main&right=feature",
+            urlencoding::encode(&root.display().to_string())
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (status, v) = get_json_body(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        let by_name = |n: &str| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["name"] == n)
+                .cloned()
+                .unwrap()
+        };
+        // main relative to feature: a modified, b only on feature → deleted,
+        // c only on main → added.
+        assert_eq!(by_name("a.xlsx")["status"], "modified");
+        assert_eq!(by_name("b.xlsx")["status"], "deleted");
+        assert_eq!(by_name("c.xlsx")["status"], "added");
+    }
+
+    #[tokio::test]
+    async fn files_unknown_ref_is_400_naming_the_ref() {
+        if !have_git() {
+            return;
+        }
+        let (_dir, root) = sides_repo();
+        let app = crate::router::router(make_state(root.clone()));
+        let url = format!(
+            "/api/files?dir={}&right=no-such-branch",
+            urlencoding::encode(&root.display().to_string())
+        );
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (status, v) = get_json_body(resp).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let msg = v["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("no-such-branch"), "message was {msg}");
+        // worktree on the right is rejected too
+        let url = format!(
+            "/api/files?dir={}&right=worktree",
+            urlencoding::encode(&root.display().to_string())
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn files_explicit_default_sides_match_no_params() {
+        if !have_git() {
+            return;
+        }
+        let (_dir, root) = sides_repo();
+        let make_url = |suffix: &str| {
+            format!(
+                "/api/files?dir={}{suffix}",
+                urlencoding::encode(&root.display().to_string())
+            )
+        };
+        let app = crate::router::router(make_state(root.clone()));
+        let a = get_json_body(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(make_url(""))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        let b = get_json_body(
+            app.oneshot(
+                Request::builder()
+                    .uri(make_url("&left=worktree&right=HEAD"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(a.0, StatusCode::OK);
+        assert_eq!(b.0, StatusCode::OK);
+        assert_eq!(a.1, b.1, "explicit default sides must equal no params");
+    }
+
+    #[tokio::test]
+    async fn preview_deleted_file_serves_head_blob_all_deleted() {
+        if !have_git() {
+            return;
+        }
+        let f = fixture_xlsx();
+        if !f.exists() {
+            eprintln!("skipping: fixture {} not present", f.display());
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        git_in(&root, &["config", "user.email", "t@e.com"]);
+        git_in(&root, &["config", "user.name", "T"]);
+        std::fs::copy(&f, root.join("base.xlsx")).unwrap();
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "init"]);
+        // The worktree copy disappears (the classic deleted-file shape).
+        std::fs::remove_file(root.join("base.xlsx")).unwrap();
+        let path = root.join("base.xlsx");
+        let app = crate::router::router(make_state(root.clone()));
+
+        // /api/sheets resolves the body from HEAD.
+        let url = format!(
+            "/api/sheets?path={}",
+            urlencoding::encode(&path.display().to_string())
+        );
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // parsed preview: every cell carries diff=deleted.
+        let sheets: Vec<serde_json::Value> = serde_json::from_slice(
+            &axum::body::to_bytes(resp.into_body(), 64 * 1024)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap_or_default();
+        let sheet = sheets
+            .first()
+            .and_then(|s| s.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("Items")
+            .to_string();
+        let url = format!(
+            "/api/parsed_preview?path={}&sheet={}&max_rows=50",
+            urlencoding::encode(&path.display().to_string()),
+            urlencoding::encode(&sheet),
+        );
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (status, v) = get_json_body(resp).await;
+        assert_eq!(status, StatusCode::OK, "body {v}");
+        let rows = v["rows"].as_array().cloned().unwrap_or_default();
+        assert!(!rows.is_empty());
+        for row in &rows {
+            for cell in row["cells"].as_array().cloned().unwrap_or_default() {
+                assert_eq!(cell["diff"], "deleted", "cell {cell}");
+            }
+        }
+        assert_eq!(v["diff_summary"]["deleted_rows"], rows.len());
+    }
+
+    #[tokio::test]
+    async fn preview_left_branch_uses_ref_blob_as_body() {
+        if !have_git() {
+            return;
+        }
+        let f = fixture_xlsx();
+        if !f.exists() {
+            eprintln!("skipping: fixture {} not present", f.display());
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        git_in(&root, &["config", "user.email", "t@e.com"]);
+        git_in(&root, &["config", "user.name", "T"]);
+        std::fs::copy(&f, root.join("base.xlsx")).unwrap();
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "init"]);
+        // Corrupt the worktree copy: only a body materialized from main can
+        // still open.
+        std::fs::write(root.join("base.xlsx"), b"not an xlsx").unwrap();
+        let path = root.join("base.xlsx");
+        let app = crate::router::router(make_state(root.clone()));
+        let sheet = excel::list_sheets(&f).unwrap()[0].name.clone();
+        let url = format!(
+            "/api/preview?path={}&sheet={}&max_rows=20&left=main",
+            urlencoding::encode(&path.display().to_string()),
+            urlencoding::encode(&sheet),
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "body should come from the main blob, not the corrupt worktree file"
+        );
+    }
+
 
     fn fixture_dir() -> std::path::PathBuf {
         fixture_xlsx()

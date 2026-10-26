@@ -23,6 +23,66 @@ export interface FileEntry {
 
 export type FileStatus = 'modified' | 'added' | 'untracked' | 'deleted' | 'clean';
 
+// ---- comparison sides (left vs right) ----
+
+/** The active git comparison: left = 'worktree' or a ref, right = a ref. */
+export interface DiffSides {
+  left: string;
+  right: string;
+}
+
+export const DEFAULT_SIDES: DiffSides = { left: 'worktree', right: 'HEAD' };
+
+const SIDES_KEY = 'tablec.diff-sides';
+
+function isDiffSides(v: unknown): v is DiffSides {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    typeof (v as DiffSides).left === 'string' &&
+    typeof (v as DiffSides).right === 'string' &&
+    (v as DiffSides).left !== '' &&
+    (v as DiffSides).right !== '' &&
+    (v as DiffSides).right.toLowerCase() !== 'worktree'
+  );
+}
+
+/** Restore persisted sides; defaults (and anything malformed) fall back. */
+export function loadDiffSides(): DiffSides {
+  try {
+    const v = JSON.parse(localStorage.getItem(SIDES_KEY) ?? 'null');
+    if (isDiffSides(v)) return { left: v.left, right: v.right };
+  } catch {
+    /* unreadable storage → defaults */
+  }
+  return { ...DEFAULT_SIDES };
+}
+
+/** Persist sides unless they are the defaults (keep storage clean). */
+export function persistDiffSides(s: DiffSides): void {
+  try {
+    if (s.left === DEFAULT_SIDES.left && s.right === DEFAULT_SIDES.right) {
+      localStorage.removeItem(SIDES_KEY);
+    } else {
+      localStorage.setItem(SIDES_KEY, JSON.stringify(s));
+    }
+  } catch {
+    /* storage full/blocked → selection just won't persist */
+  }
+}
+
+/** Query-string fragment for the active sides (empty for defaults, so
+ *  default requests stay byte-identical to the pre-sides API calls). */
+export function sidesQuery(): string {
+  const s = store.diffSides;
+  if (s.left === DEFAULT_SIDES.left && s.right === DEFAULT_SIDES.right) return '';
+  return `&left=${encodeURIComponent(s.left)}&right=${encodeURIComponent(s.right)}`;
+}
+
+/** Document-level event fired when the comparison sides change, so every
+ *  view that renders against the baseline (file list, previews) reloads. */
+export const SIDES_CHANGED_EVENT = 'tablec:sides-changed';
+
 export type FilesFilter = 'all' | 'modified';
 
 /** True when a file status counts as "changed" for the Modified-only filter. */
@@ -318,6 +378,13 @@ export interface AppStore {
   /** Rail sort: factor + direction (default name ascending). */
   sortFactor: SortFactor;
   sortAsc: boolean;
+  /** Active git comparison sides (see DiffSides). */
+  diffSides: DiffSides;
+  /** Branch names for the comparison selector (from /api/branches). */
+  branches: string[];
+  /** Named-ref error from the last sides-bearing request, shown in the
+   *  compare bar until the selection changes (null when clean). */
+  diffError: string | null;
   busy: boolean;
   lastResult: ActionResult | null;
 }
@@ -342,6 +409,9 @@ export const store: AppStore = {
   checkRunning: false,
   sortFactor: 'name',
   sortAsc: true,
+  diffSides: loadDiffSides(),
+  branches: [],
+  diffError: null,
   busy: false,
   lastResult: null,
 };
