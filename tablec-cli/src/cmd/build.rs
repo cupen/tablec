@@ -3,7 +3,7 @@ use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tablec_core::core::config::{self, Config};
+use tablec_core::core::config::ResolvedConfig;
 use tablec_core::core::project::project::Project;
 use tablec_core::core::table::constraint::ConstraintValidator;
 use tablec_core::core::table::table::read_excel;
@@ -21,20 +21,6 @@ fn fmt_duration(d: Duration) -> String {
     } else {
         format!("{:.1}s", ms / 1000.0)
     }
-}
-
-/// Look for `tablec.toml` (preferred) or `.tablec.toml` inside `dir`.
-/// Returns the first match, or `None` if neither file exists.
-fn find_tablec_toml(dir: &Path) -> Option<PathBuf> {
-    let plain = dir.join("tablec.toml");
-    if plain.exists() {
-        return Some(plain);
-    }
-    let dotfile = dir.join(".tablec.toml");
-    if dotfile.exists() {
-        return Some(dotfile);
-    }
-    None
 }
 
 /// Map an export format name to its file extension.
@@ -56,15 +42,18 @@ fn validate_table_silent(table: &tablec_core::core::table::table::Table) {
 
 #[derive(Args, Debug)]
 pub struct BuildCommand {
-    /// Input Excel file or directory of Excel files. Defaults to current directory if omitted.
+    /// Input Excel file or directory of Excel files. When omitted, the
+    /// resolved config's `data.input_dir` is used (cwd by default).
     #[arg(short, long)]
     pub input: Option<String>,
 
-    /// Output file (merge mode / single-file).
+    /// Output file (merge mode / single-file). In directory mode it overrides
+    /// the config-derived `{output_dir}/{project.name}.{ext}`.
     #[arg(short, long)]
     pub output: Option<String>,
 
-    /// Config file path. If omitted in directory mode, the tool searches for `tablec.toml` / `.tablec.toml` inside the input directory.
+    /// Config file path. Overrides discovery (cwd first, then the target
+    /// input directory).
     #[arg(long)]
     pub config: Option<PathBuf>,
 
@@ -88,46 +77,74 @@ pub struct BuildCommand {
 
 impl BuildCommand {
     pub fn run(&self) -> Result<(), Box<dyn Error>> {
-        let input_path = self
-            .input
-            .as_deref()
-            .map(Path::new)
-            .unwrap_or_else(|| Path::new("."));
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("failed to read current directory: {e}"))?;
+        self.run_in(&cwd)
+    }
 
-        let explicit_cfg = Config::load(self.config.as_deref())?;
+    /// [`Self::run`] with the process cwd made explicit (unit-testable).
+    fn run_in(&self, cwd: &Path) -> Result<(), Box<dyn Error>> {
+        // Discovery target: the -i directory itself, a file's parent, or the
+        // cwd when -i is omitted.
+        let target_dir: PathBuf = match self.input.as_deref() {
+            Some(i) => {
+                let p = Path::new(i);
+                if p.is_dir() {
+                    p.to_path_buf()
+                } else {
+                    p.parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."))
+                        .to_path_buf()
+                }
+            }
+            None => cwd.to_path_buf(),
+        };
 
-        if input_path.is_dir() {
-            self.run_dir(input_path, explicit_cfg)
-        } else if input_path.is_file() {
-            self.run_single(input_path, explicit_cfg)
+        let resolved = ResolvedConfig::resolve_in(cwd, self.config.as_deref(), &target_dir, cwd)?;
+
+        // Input location: -i wins; else the config's resolved input_dir.
+        let scan: PathBuf = match self.input.as_deref() {
+            Some(i) => PathBuf::from(i),
+            None => resolved.input_dir.clone(),
+        };
+
+        if scan.is_file() {
+            self.run_single(&scan, &resolved)
+        } else if scan.is_dir() {
+            self.run_dir(&scan, &resolved)
         } else {
-            Err(format!("input {:?} is neither a file nor a directory", input_path).into())
+            Err(format!("input {:?} is neither a file nor a directory", scan).into())
         }
     }
 
-    fn run_single(&self, input: &Path, explicit_cfg: Option<Config>) -> Result<(), Box<dyn Error>> {
-        let cfg = explicit_cfg.unwrap_or_default();
+    fn plugin_paths_for(&self, resolved: &ResolvedConfig) -> Vec<PathBuf> {
+        // Config-relative plugin paths arrive already anchored (absolute);
+        // CLI --plugin-path args stay cwd-relative.
+        resolved
+            .plugin_paths
+            .iter()
+            .cloned()
+            .chain(self.plugin_paths.iter().map(PathBuf::from))
+            .collect()
+    }
+
+    fn run_single(&self, input: &Path, resolved: &ResolvedConfig) -> Result<(), Box<dyn Error>> {
+        let cfg = &resolved.config;
         let format = self
             .format
             .clone()
             .unwrap_or_else(|| cfg.export.format.clone());
-        let include_fields = self
-            .include_fields
-            .unwrap_or(cfg.export.include_fields.unwrap_or(false));
+        let include_fields = self.include_fields.unwrap_or(cfg.export.include_fields);
 
-        let plugin_paths: Vec<PathBuf> = cfg
-            .plugins
-            .iter()
-            .map(|plugin| PathBuf::from(&plugin.path))
-            .chain(self.plugin_paths.iter().map(PathBuf::from))
-            .collect();
+        let plugin_paths = self.plugin_paths_for(resolved);
         let _parser =
-            crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref(), &plugin_paths);
+            crate::parser_resolve::resolve_parser(cfg, self.parser.as_deref(), &plugin_paths);
 
         let output = self
             .output
             .as_ref()
-            .ok_or("No output file specified. Use -o <file> or provide a config file.")?;
+            .ok_or("No output file specified. Use -o <file> for single-file builds.")?;
 
         let input_str = input.to_string_lossy().into_owned();
         let format_for_ext = format.clone();
@@ -140,65 +157,43 @@ impl BuildCommand {
         )
     }
 
-    fn run_dir(
-        &self,
-        input_dir: &Path,
-        explicit_cfg: Option<Config>,
-    ) -> Result<(), Box<dyn Error>> {
-        let cfg = match explicit_cfg {
-            Some(c) => c,
-            None => match find_tablec_toml(input_dir) {
-                Some(path) => Config::load_from_file(&path)?,
-                None => {
-                    if self.output.is_none() {
-                        return Err("missing -o (or tablec.toml in input dir)".into());
-                    }
-                    Config::default()
-                }
-            },
-        };
-
+    fn run_dir(&self, scan_dir: &Path, resolved: &ResolvedConfig) -> Result<(), Box<dyn Error>> {
+        let cfg = &resolved.config;
         let format = self
             .format
             .clone()
             .unwrap_or_else(|| cfg.export.format.clone());
-        let include_fields = self
-            .include_fields
-            .unwrap_or(cfg.export.include_fields.unwrap_or(false));
+        let include_fields = self.include_fields.unwrap_or(cfg.export.include_fields);
 
         let include = cfg.data.include.clone().unwrap_or_default();
         let exclude = cfg.data.exclude.clone().unwrap_or_default();
-        let files = config::find_excel_files(&input_dir.to_string_lossy(), &include, &exclude)?;
+        let files = tablec_core::core::config::find_excel_files(
+            &scan_dir.to_string_lossy(),
+            &include,
+            &exclude,
+        )?;
 
-        let plugin_paths: Vec<PathBuf> = cfg
-            .plugins
-            .iter()
-            .map(|plugin| PathBuf::from(&plugin.path))
-            .chain(self.plugin_paths.iter().map(PathBuf::from))
-            .collect();
+        let plugin_paths = self.plugin_paths_for(resolved);
         let _parser =
-            crate::parser_resolve::resolve_parser(&cfg, self.parser.as_deref(), &plugin_paths);
+            crate::parser_resolve::resolve_parser(cfg, self.parser.as_deref(), &plugin_paths);
 
         if files.is_empty() {
             return Err(format!(
-                "directory {:?} contains no xlsx files matching config",
-                input_dir
+                "no matching spreadsheet files in {:?} (check include/exclude patterns)",
+                scan_dir
             )
             .into());
         }
 
         let ext = ext_for(&format).to_string();
 
-        // Output path: from -o if given; else from config's export.output_dir
-        // and project.name; else error.
+        // Output path: -o wins; else {output_dir}/{project.name}.{ext} —
+        // derived from defaults too, so a zero-config build succeeds.
         let output_path: PathBuf = match self.output.as_deref() {
             Some(s) => PathBuf::from(s),
-            None => {
-                let dir = cfg.export.output_dir.as_str();
-                let name = cfg.project.name.as_str();
-                let path = format!("{}/{}.{}", dir, name, ext);
-                PathBuf::from(path)
-            }
+            None => resolved
+                .output_dir
+                .join(format!("{}.{}", cfg.project.name, ext)),
         };
 
         self.build_merged_files_with_ext(&files, &output_path, &format, include_fields, &ext)
@@ -458,34 +453,9 @@ mod tests {
         assert_eq!(s, "12.5s");
     }
 
-    use super::find_tablec_toml;
-    use std::fs;
-
-    #[test]
-    fn find_tablec_toml_prefers_tablec_over_dotfile() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("tablec.toml"), "").unwrap();
-        fs::write(dir.path().join(".tablec.toml"), "").unwrap();
-        let found = find_tablec_toml(dir.path()).unwrap();
-        assert_eq!(found, dir.path().join("tablec.toml"));
-    }
-
-    #[test]
-    fn find_tablec_toml_falls_back_to_dotfile() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join(".tablec.toml"), "").unwrap();
-        let found = find_tablec_toml(dir.path()).unwrap();
-        assert_eq!(found, dir.path().join(".tablec.toml"));
-    }
-
-    #[test]
-    fn find_tablec_toml_returns_none_when_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(find_tablec_toml(dir.path()).is_none());
-    }
-
     use super::{BuildCommand, ext_for};
     use rust_xlsxwriter::Workbook;
+    use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -518,6 +488,22 @@ mod tests {
         path
     }
 
+    fn cmd_with(
+        input: Option<String>,
+        output: Option<String>,
+        config: Option<PathBuf>,
+    ) -> BuildCommand {
+        BuildCommand {
+            input,
+            output,
+            config,
+            format: None,
+            include_fields: None,
+            parser: None,
+            plugin_paths: Vec::new(),
+        }
+    }
+
     #[test]
     fn ext_for_msgpack() {
         assert_eq!(ext_for("msgpack"), "msgpack");
@@ -534,22 +520,21 @@ mod tests {
     }
 
     #[test]
-    fn test_dir_mode_uses_default_when_no_config() {
+    fn dir_mode_with_explicit_input_and_output() {
         let dir = tempdir().unwrap();
         write_minimal_xlsx_with_sheet(dir.path(), "a.xlsx", "SheetA");
         write_minimal_xlsx_with_sheet(dir.path(), "b.xlsx", "SheetB");
         fs::write(dir.path().join("notes.csv"), "ignore me").unwrap();
 
-        let cmd = BuildCommand {
-            input: Some(dir.path().to_string_lossy().into_owned()),
-            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
-            config: None,
-            format: None,
-            include_fields: None,
-            parser: None,
-            plugin_paths: Vec::new(),
-        };
-        cmd.run().expect("dir mode build should succeed");
+        // cwd elsewhere: the explicit -i input governs scanning regardless.
+        let cwd = tempdir().unwrap();
+        let cmd = cmd_with(
+            Some(dir.path().to_string_lossy().into_owned()),
+            Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            None,
+        );
+        cmd.run_in(cwd.path())
+            .expect("dir mode build should succeed");
 
         // One merged output file containing both sheets
         let out_text = fs::read_to_string(dir.path().join("out.json")).unwrap();
@@ -567,10 +552,9 @@ mod tests {
     }
 
     #[test]
-    fn test_dir_mode_auto_discovers_tablec_toml() {
+    fn dir_mode_discovers_config_in_input_dir() {
         let dir = tempdir().unwrap();
         write_minimal_xlsx_with_sheet(dir.path(), "only.xlsx", "Only");
-        write_minimal_xlsx_with_sheet(dir.path(), "ignored.xlsx", "Ignored");
         fs::write(
             dir.path().join("tablec.toml"),
             r#"
@@ -587,64 +571,60 @@ output_dir = "."
         )
         .unwrap();
 
-        // Without -o, should write to ./auto.json in cwd; use -o to scope output
-        let cmd = BuildCommand {
-            input: Some(dir.path().to_string_lossy().into_owned()),
-            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
-            config: None,
-            format: None,
-            include_fields: None,
-            parser: None,
-            plugin_paths: Vec::new(),
-        };
-        cmd.run().expect("dir mode build should succeed");
+        // No cwd config, so the target-dir config governs (name "auto" drives
+        // the derived output when -o is absent — here -o wins).
+        let cwd = tempdir().unwrap();
+        let cmd = cmd_with(
+            Some(dir.path().to_string_lossy().into_owned()),
+            Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            None,
+        );
+        cmd.run_in(cwd.path())
+            .expect("dir mode build should succeed");
 
         let out_text = fs::read_to_string(dir.path().join("out.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&out_text).unwrap();
-        let tables = parsed
-            .get("tables")
-            .and_then(|v| v.as_array())
-            .expect("tables array");
-        assert!(tables.len() >= 1);
+        assert!(
+            parsed
+                .get("tables")
+                .and_then(|v| v.as_array())
+                .unwrap()
+                .len()
+                >= 1
+        );
     }
 
     #[test]
-    fn test_dir_mode_errors_when_no_xlsx() {
+    fn dir_mode_errors_when_no_matching_files() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("readme.txt"), "no xlsx here").unwrap();
 
-        let cmd = BuildCommand {
-            input: Some(dir.path().to_string_lossy().into_owned()),
-            output: Some(dir.path().join("out.json").to_string_lossy().into_owned()),
-            config: None,
-            format: None,
-            include_fields: None,
-            parser: None,
-            plugin_paths: Vec::new(),
-        };
-        let err = cmd.run().expect_err("should fail with no xlsx files");
+        let cwd = tempdir().unwrap();
+        let cmd = cmd_with(
+            Some(dir.path().to_string_lossy().into_owned()),
+            Some(dir.path().join("out.json").to_string_lossy().into_owned()),
+            None,
+        );
+        let err = cmd
+            .run_in(cwd.path())
+            .expect_err("should fail with no xlsx files");
         assert!(
-            err.to_string().contains("no xlsx"),
+            err.to_string().contains("no matching spreadsheet files"),
             "unexpected error: {}",
             err
         );
     }
 
     #[test]
-    fn test_single_file_still_requires_output() {
+    fn single_file_still_requires_output() {
         let dir = tempdir().unwrap();
         let xlsx = write_minimal_xlsx(dir.path(), "foo.xlsx");
 
-        let cmd = BuildCommand {
-            input: Some(xlsx.to_string_lossy().into_owned()),
-            output: None,
-            config: None,
-            format: None,
-            include_fields: None,
-            parser: None,
-            plugin_paths: Vec::new(),
-        };
-        let err = cmd.run().expect_err("single file without -o should fail");
+        let cwd = tempdir().unwrap();
+        let cmd = cmd_with(Some(xlsx.to_string_lossy().into_owned()), None, None);
+        let err = cmd
+            .run_in(cwd.path())
+            .expect_err("single file without -o should fail");
         assert!(
             err.to_string().contains("No output file specified"),
             "unexpected error: {}",
@@ -652,26 +632,97 @@ output_dir = "."
         );
     }
 
+    /// Zero-config bare build: no -i, no -o, no config anywhere — scans the
+    /// cwd and derives `output/default.json`.
     #[test]
-    fn test_dir_mode_no_config_no_output_errors() {
-        // tempdir with 1 xlsx, no tablec.toml, no -o
-        let dir = tempdir().unwrap();
-        write_minimal_xlsx(dir.path(), "only.xlsx");
+    fn bare_build_zero_config_writes_default_output() {
+        let cwd = tempdir().unwrap();
+        write_minimal_xlsx_with_sheet(cwd.path(), "t.xlsx", "T");
 
-        let cmd = BuildCommand {
-            input: Some(dir.path().to_string_lossy().into_owned()),
-            output: None,
-            config: None,
-            format: None,
-            include_fields: None,
-            parser: None,
-            plugin_paths: Vec::new(),
-        };
-        let err = cmd
-            .run()
-            .expect_err("dir mode without config and without -o should fail");
+        let cmd = cmd_with(None, None, None);
+        cmd.run_in(cwd.path()).expect("bare build should succeed");
+
+        let out = cwd.path().join("output").join("default.json");
+        let out_text = fs::read_to_string(&out).expect("output/default.json exists");
+        let parsed: serde_json::Value = serde_json::from_str(&out_text).unwrap();
+        let tables = parsed.get("tables").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].get("name").and_then(|n| n.as_str()), Some("T"));
+    }
+
+    /// No -i: the config's input_dir governs scanning, anchored at the
+    /// config file's directory.
+    #[test]
+    fn input_dir_from_config_when_i_omitted() {
+        let cwd = tempdir().unwrap();
+        std::fs::create_dir(cwd.path().join("sheets")).unwrap();
+        write_minimal_xlsx_with_sheet(&cwd.path().join("sheets"), "s.xlsx", "S");
+        fs::write(
+            cwd.path().join("tablec.toml"),
+            "[data]\ninput_dir = \"sheets\"\n\n[export]\noutput_dir = \"staging\"",
+        )
+        .unwrap();
+
+        let cmd = cmd_with(None, None, None);
+        cmd.run_in(cwd.path())
+            .expect("config-driven build should succeed");
+
+        // Output derives from the config: staging/default.json (project name
+        // defaults to "default").
+        let out = cwd.path().join("staging").join("default.json");
+        let out_text = fs::read_to_string(&out).expect("staging/default.json exists");
+        let parsed: serde_json::Value = serde_json::from_str(&out_text).unwrap();
+        let tables = parsed.get("tables").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(tables[0].get("name").and_then(|n| n.as_str()), Some("S"));
+    }
+
+    /// cwd config beats the target directory's config (cwd-first discovery).
+    #[test]
+    fn cwd_config_wins_over_input_dir_config() {
+        let cwd = tempdir().unwrap();
+        fs::write(
+            cwd.path().join("tablec.toml"),
+            "[project]\nname = \"cwdcfg\"\n\n[data]\ninput_dir = \".\"\n\n[export]\nformat = \"json\"\noutput_dir = \"from-cwd\"",
+        )
+        .unwrap();
+
+        let target = tempdir().unwrap();
+        write_minimal_xlsx_with_sheet(target.path(), "t.xlsx", "T");
+        fs::write(
+            target.path().join("tablec.toml"),
+            "[project]\nname = \"targetcfg\"\n\n[data]\ninput_dir = \".\"\n\n[export]\nformat = \"json\"\noutput_dir = \"from-target\"",
+        )
+        .unwrap();
+
+        // -i points at the target dir, but the cwd config governs export.
+        let cmd = cmd_with(
+            Some(target.path().to_string_lossy().into_owned()),
+            None,
+            None,
+        );
+        cmd.run_in(cwd.path()).expect("build should succeed");
+
+        let out = cwd.path().join("from-cwd").join("cwdcfg.json");
         assert!(
-            err.to_string().contains("missing -o") || err.to_string().contains("tablec.toml"),
+            out.exists(),
+            "expected cwd-config-derived output at {}",
+            out.display()
+        );
+        assert!(
+            !cwd.path().join("from-target").exists(),
+            "target-dir config must not govern"
+        );
+    }
+
+    /// Empty cwd with no -i and no config: the no-files error replaces the
+    /// old missing--o error.
+    #[test]
+    fn bare_build_empty_dir_errors_with_no_matching_files() {
+        let cwd = tempdir().unwrap();
+        let cmd = cmd_with(None, None, None);
+        let err = cmd.run_in(cwd.path()).expect_err("empty cwd should fail");
+        assert!(
+            err.to_string().contains("no matching spreadsheet files"),
             "unexpected error: {}",
             err
         );

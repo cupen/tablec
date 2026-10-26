@@ -51,6 +51,46 @@ If the input directory contains `tablec.toml` (or `.tablec.toml`), it controls
 include patterns, output name, format, and so on. `--config path/to/other.toml`
 overrides auto-discovery.
 
+### Configuration (`tablec.toml`)
+
+`tablec build`, `tablec check`, and `tablec webui` all resolve one config the
+same way:
+
+1. `--config <path>` if given
+2. `tablec.toml` / `.tablec.toml` in the current working directory
+3. `tablec.toml` / `.tablec.toml` in the target directory
+4. built-in defaults
+
+Every section and field is optional. Relative `data.input_dir`,
+`export.output_dir`, and `plugins[].path` values resolve against the
+directory containing the config file, so the same config behaves the same
+no matter where you run the command from.
+
+```toml
+[project]
+name = "my-tables"        # output file name (default: "default")
+
+[data]
+input_dir = "."           # where spreadsheets live (default: ".")
+include = ["*.xlsx"]      # glob patterns (default: ["*.xlsx"])
+exclude = ["~$*.xlsx"]    # exclusion patterns
+
+[export]
+format = "json"           # json | json-pretty | msgpack (default: "json")
+output_dir = "output"     # default: "output"
+include_fields = false    # include field metadata (default: false)
+
+[parser]
+name = "my-parser"        # schema parser (default: "standard")
+
+[[plugins]]
+path = "./libparser.so"   # cdylib schema parser plugin
+```
+
+With no `-o`, a directory build writes `{output_dir}/{project.name}.{ext}` —
+a bare `tablec build` over a folder of spreadsheets writes
+`output/default.json`.
+
 
 ## Data Format
 

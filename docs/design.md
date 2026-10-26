@@ -230,6 +230,15 @@ tablec 通过 `SchemaParser` trait 暴露插件接口。用户实现该 trait �
 
 详细 API 见 `tablec-core/src/core/schema.rs`。
 
+## 配置解析（tablec.toml）
+
+`build` / `check` / `webui` 三个入口共用 `tablec-core` 的同一套配置解析（`ResolvedConfig`）：
+
+- **发现顺序**：`--config` 显式指定 > 进程 cwd 下的 `tablec.toml` / `.tablec.toml` > 目标目录下的同名文件 > 内置默认值。
+- **路径基准**：`data.input_dir`、`export.output_dir`、`plugins[].path` 的相对值以**配置文件所在目录**为基准；未找到配置文件时以 cwd（webui 为 `--dir`）兜底。绝对路径原样通过。
+- **默认值**：所有字段可省略 —— `project.name = "default"`、`data.input_dir = "."`、`data.include = ["*.xlsx"]`、`export.format = "json"`、`export.output_dir = "output"`、`export.include_fields = false`。
+- **严格模式**：未知键直接报错（`deny_unknown_fields`，逐 struct 标注）；`export.pretty` 已删除，缩进由 `format = "json-pretty"` 表达。
+
 ## WebUI 差异预览（git 基线）
 
 webui（`tablec webui`）提供基于 git 的变更预览：以**当前分支 HEAD** 为基线，对比工作区表格内容。

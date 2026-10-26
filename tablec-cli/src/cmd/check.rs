@@ -2,12 +2,12 @@ use clap::Args;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use tablec_core::core::check::check_project;
-use tablec_core::core::config::Config;
+use tablec_core::core::config::{Config, ResolvedConfig};
 use tablec_core::core::diagnostic::{Diagnostic, Severity};
 
 #[derive(Args, Debug)]
 pub struct CheckCommand {
-    /// Config file path (default: tablec.toml in current directory)
+    /// Config file path. Overrides discovery (cwd first, then the target directory).
     #[arg(long)]
     pub config: Option<PathBuf>,
 
@@ -55,16 +55,14 @@ fn is_no_files_notice(diags: &[Diagnostic]) -> bool {
 /// include/exclude globs (defaulting to `*.xlsx`); an explicit file target
 /// is checked exactly — its parent directory with the file name as the sole
 /// include pattern, ignoring config globs.
-fn target_scope(path: &Path, config: &Option<Config>) -> (PathBuf, Vec<String>, Vec<String>) {
+fn target_scope(path: &Path, config: &Config) -> (PathBuf, Vec<String>, Vec<String>) {
     if path.is_dir() {
         let include = config
-            .as_ref()
-            .and_then(|c| c.data.include.clone())
+            .data
+            .include
+            .clone()
             .unwrap_or_else(|| vec!["*.xlsx".to_string()]);
-        let exclude = config
-            .as_ref()
-            .and_then(|c| c.data.exclude.clone())
-            .unwrap_or_default();
+        let exclude = config.data.exclude.clone().unwrap_or_default();
         (path.to_path_buf(), include, exclude)
     } else {
         // Explicit file target (path existence is checked by the caller).
@@ -82,31 +80,43 @@ fn target_scope(path: &Path, config: &Option<Config>) -> (PathBuf, Vec<String>, 
 
 fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
     println!("Checking tables...");
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("failed to read current directory: {e}"))?;
+    _run_in(c, &cwd)
+}
 
-    // Try to load config
-    let config = Config::load(c.config.as_deref())?;
+/// [`_run`] with the process cwd made explicit (unit-testable).
+fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
+    // Discovery target: the CLI path's directory (a file's parent), or the
+    // cwd when no path is given.
+    let target_dir: PathBuf = match &c.path {
+        Some(p) if p.is_dir() => p.clone(),
+        Some(p) => p
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
+        None => cwd.to_path_buf(),
+    };
+
+    let resolved = ResolvedConfig::resolve_in(cwd, c.config.as_deref(), &target_dir, cwd)?;
+    let config = resolved.config.clone();
 
     // Resolve schema parser (cli > config > "standard"). The resolved parser
-    // is what the shared check pipeline parses every file with.
-    let parser_cfg = config.clone().unwrap_or_default();
-    let plugin_paths: Vec<PathBuf> = parser_cfg
-        .plugins
+    // is what the shared check pipeline parses every file with. Config
+    // plugin paths arrive already anchored; CLI args stay cwd-relative.
+    let plugin_paths: Vec<PathBuf> = resolved
+        .plugin_paths
         .iter()
-        .map(|plugin| PathBuf::from(&plugin.path))
+        .cloned()
         .chain(c.plugin_paths.iter().map(PathBuf::from))
         .collect();
-    let parser =
-        crate::parser_resolve::resolve_parser(&parser_cfg, c.parser.as_deref(), &plugin_paths);
+    let parser = crate::parser_resolve::resolve_parser(&config, c.parser.as_deref(), &plugin_paths);
 
-    let path = if let Some(p) = c.path {
-        // CLI path takes precedence
-        PathBuf::from(p)
-    } else if let Some(ref cfg) = config {
-        // Use config's input_dir
-        PathBuf::from(&cfg.data.input_dir)
-    } else {
-        // Default to current directory
-        PathBuf::from(".")
+    // CLI path takes precedence; otherwise the config's resolved input_dir.
+    let path: PathBuf = match c.path {
+        Some(p) => p,
+        None => resolved.input_dir.clone(),
     };
 
     if !path.exists() {
@@ -209,7 +219,7 @@ mod tests {
     fn dir_target_uses_configured_globs() {
         let dir = tempfile::tempdir().unwrap();
         write_sheet(&dir.path().join("a.xlsx"), "A");
-        let (input_dir, include, exclude) = target_scope(dir.path(), &None);
+        let (input_dir, include, exclude) = target_scope(dir.path(), &Config::default());
         assert_eq!(input_dir, dir.path());
         assert_eq!(include, vec!["*.xlsx".to_string()]);
         assert!(exclude.is_empty());
@@ -222,7 +232,7 @@ mod tests {
         write_sheet(&file, "B");
         write_sheet(&dir.path().join("c.xlsx"), "C"); // must NOT be matched
 
-        let (input_dir, include, exclude) = target_scope(&file, &None);
+        let (input_dir, include, exclude) = target_scope(&file, &Config::default());
         assert_eq!(input_dir, dir.path());
         assert_eq!(include, vec!["b.xlsx".to_string()]);
         assert!(exclude.is_empty());
@@ -249,7 +259,7 @@ mod tests {
         cfg.data.include = Some(vec!["never*.xlsx".to_string()]);
         cfg.data.exclude = Some(vec!["only_this.xlsx".to_string()]);
 
-        let (input_dir, include, _) = target_scope(&file, &Some(cfg));
+        let (input_dir, include, _) = target_scope(&file, &cfg);
         assert_eq!(include, vec!["only_this.xlsx".to_string()]);
         let outcome = check_project(
             &input_dir.to_string_lossy(),
@@ -259,5 +269,100 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.tables.len(), 1, "explicit file must be checked");
+    }
+
+    /// cwd-first discovery: a tablec.toml in the cwd governs the check even
+    /// when the target directory carries its own config.
+    #[test]
+    fn cwd_config_wins_over_target_dir_config() {
+        let cwd = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        write_sheet(&target.path().join("a.xlsx"), "A");
+        write_sheet(&target.path().join("b.xlsx"), "B");
+
+        // cwd config narrows the scan to a*.xlsx; the target dir's config
+        // (default globs) would check both sheets.
+        std::fs::write(
+            cwd.path().join("tablec.toml"),
+            "[data]\ninclude = [\"a*.xlsx\"]",
+        )
+        .unwrap();
+        std::fs::write(
+            target.path().join("tablec.toml"),
+            "[data]\ninput_dir = \".\"",
+        )
+        .unwrap();
+
+        let cmd = CheckCommand {
+            config: None,
+            verbose: false,
+            path: Some(target.path().to_path_buf()),
+            parser: None,
+            plugin_paths: Vec::new(),
+        };
+        // Only sheet A is in scope when the cwd config governs — proven by
+        // running the shared pipeline with the resolved scope ourselves.
+        let resolved = ResolvedConfig::resolve_in(
+            cwd.path(),
+            cmd.config.as_deref(),
+            target.path(),
+            cwd.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.config_path.as_deref(),
+            Some(cwd.path().join("tablec.toml").as_path())
+        );
+        let (input_dir, include, exclude) = target_scope(target.path(), &resolved.config);
+        assert_eq!(input_dir, target.path());
+        assert_eq!(include, vec!["a*.xlsx".to_string()]);
+        let outcome = check_project(
+            &input_dir.to_string_lossy(),
+            &include,
+            &exclude,
+            &tablec_core::core::schema::StandardSchemaParser,
+        )
+        .unwrap();
+        assert_eq!(outcome.tables.len(), 1, "cwd config's include must govern");
+        assert_eq!(outcome.tables[0].name, "A");
+    }
+
+    /// No path arg: the check target comes from the resolved config's
+    /// input_dir (anchored at the config file's directory).
+    #[test]
+    fn no_path_uses_config_input_dir_anchored_at_config_dir() {
+        let cwd = tempfile::tempdir().unwrap();
+        std::fs::create_dir(cwd.path().join("sheets")).unwrap();
+        write_sheet(&cwd.path().join("sheets").join("s.xlsx"), "S");
+        std::fs::write(
+            cwd.path().join("tablec.toml"),
+            "[data]\ninput_dir = \"sheets\"",
+        )
+        .unwrap();
+
+        let cmd = CheckCommand {
+            config: None,
+            verbose: false,
+            path: None,
+            parser: None,
+            plugin_paths: Vec::new(),
+        };
+        // The command's own resolution path: no path arg → the config's
+        // input_dir governs and the run must succeed end to end.
+        _run_in(cmd, cwd.path()).expect("check via config input_dir should succeed");
+        let resolved =
+            ResolvedConfig::resolve_in(cwd.path(), None, cwd.path(), cwd.path()).unwrap();
+        assert_eq!(resolved.input_dir, cwd.path().join("sheets"));
+        assert!(resolved.input_dir.is_dir(), "config input_dir must resolve");
+        let (input_dir, include, _) = target_scope(&resolved.input_dir, &resolved.config);
+        let outcome = check_project(
+            &input_dir.to_string_lossy(),
+            &include,
+            &[],
+            &tablec_core::core::schema::StandardSchemaParser,
+        )
+        .unwrap();
+        assert_eq!(outcome.tables.len(), 1);
+        assert_eq!(outcome.tables[0].name, "S");
     }
 }

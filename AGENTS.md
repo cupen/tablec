@@ -18,7 +18,7 @@ Rust CLI:
 ```bash
 cargo build                                  # dev build only — no --release (disk-space convention)
 cargo test                                   # unit + integration tests
-target/debug/tablec build                    # build a directory; auto-discovers tablec.toml
+target/debug/tablec build                    # config discovery: --config > cwd > target dir > defaults
 target/debug/tablec check path/to/files
 target/debug/tablec example -o out.xlsx -r 10
 target/debug/tablec webui --dir ./data       # launch local webui on 127.0.0.1:<OS-assigned>; auto-opens browser

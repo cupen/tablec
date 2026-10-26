@@ -49,6 +49,40 @@ tablec example -o example.xlsx -r 10
 
 如果输入目录中包含 `tablec.toml`（或 `.tablec.toml`），它会控制 include 模式、输出文件名、格式等配置项。可通过 `--config path/to/other.toml` 覆盖自动发现行为。
 
+### 配置文件（`tablec.toml`）
+
+`tablec build`、`tablec check`、`tablec webui` 三个入口按同一规则解析配置：
+
+1. 显式 `--config <path>`
+2. 当前工作目录下的 `tablec.toml` / `.tablec.toml`
+3. 目标目录下的 `tablec.toml` / `.tablec.toml`
+4. 内置默认值
+
+所有 section 和字段均可省略。`data.input_dir`、`export.output_dir`、`plugins[].path` 的相对路径以**配置文件所在目录**为基准解析，无论从哪个目录执行命令，行为都一致。
+
+```toml
+[project]
+name = "my-tables"        # 输出文件名（默认 "default"）
+
+[data]
+input_dir = "."           # 表格所在目录（默认 "."）
+include = ["*.xlsx"]      # include 模式（默认 ["*.xlsx"]）
+exclude = ["~$*.xlsx"]    # 排除模式
+
+[export]
+format = "json"           # json | json-pretty | msgpack（默认 "json"）
+output_dir = "output"     # 默认 "output"
+include_fields = false    # 是否附带字段元数据（默认 false）
+
+[parser]
+name = "my-parser"        # schema parser（默认 "standard"）
+
+[[plugins]]
+path = "./libparser.so"   # cdylib schema parser 插件
+```
+
+省略 `-o` 时，目录模式输出为 `{output_dir}/{project.name}.{ext}`——对一个只有表格的目录直接执行 `tablec build`，会写出 `output/default.json`。
+
 ## 数据格式
 
 Excel 工作表结构（前 5 行预留给 Schema）：

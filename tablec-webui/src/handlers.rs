@@ -19,7 +19,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use tablec_core::core::check::check_project;
-use tablec_core::core::config::Config;
+use tablec_core::core::config::{Config, ResolvedConfig};
 use tablec_core::core::diagnostic::Diagnostic;
 use tablec_core::core::project::project::Project;
 use tablec_core::export::{Format, Json as JsonFmt, Msgpack};
@@ -230,47 +230,44 @@ pub struct StateBody {
     pub input_dir: String,
 }
 
-pub async fn api_state(State(state): State<Arc<WebuiState>>) -> Json<StateBody> {
+pub async fn api_state(State(state): State<Arc<WebuiState>>) -> Result<Json<StateBody>, ApiError> {
     let active_parser = state
         .parser_override
         .clone()
         .or_else(|| Some("standard".to_string()));
 
-    let cfg = resolve_config(&state, &state.dir).await;
-    let config_present = cfg.1.is_some();
+    let resolved = resolve_config(&state, &state.dir).await?;
 
-    Json(StateBody {
+    Ok(Json(StateBody {
         dir: state.dir.display().to_string(),
         host: "127.0.0.1".to_string(),
         port_obs: 0,
         parser_names: state.registry.parser_names(),
         active_parser,
-        config_path: cfg.1.map(|p| p.display().to_string()),
-        config_present,
-        input_dir: resolve_input_dir(&state.dir, &cfg.0.data.input_dir)
-            .display()
-            .to_string(),
-    })
+        config_path: resolved
+            .config_path
+            .as_ref()
+            .map(|p| p.display().to_string()),
+        config_present: resolved.config_path.is_some(),
+        input_dir: resolved.input_dir.display().to_string(),
+    }))
 }
 
-/// Join `dir` with the configured `input_dir`, treating `"."` as "the
-/// directory itself" so paths don't grow a trailing `/.`.
-pub(crate) fn resolve_input_dir(dir: &Path, input_dir: &str) -> PathBuf {
-    if input_dir == "." {
-        dir.to_path_buf()
-    } else {
-        dir.join(input_dir)
-    }
-}
-
-async fn resolve_config(state: &WebuiState, dir: &Path) -> (Config, Option<PathBuf>) {
+/// Resolve (and cache) the config for `dir`. The cache is keyed by the
+/// requested directory so different `dir=` values resolve independently;
+/// resolution errors are cached alongside successes so a broken config is
+/// reported consistently on every request.
+async fn resolve_config(state: &WebuiState, dir: &Path) -> Result<ResolvedConfig, ApiError> {
     let mut guard = state.config_cache.lock().await;
-    if guard.is_none() {
-        let (cfg, from) = state.load_config_for(dir).await;
-        *guard = Some(cfg.clone());
-        return (cfg, from);
-    }
-    (guard.as_ref().unwrap().clone(), None)
+    let outcome = match guard.as_ref() {
+        Some((cached_dir, cached)) if cached_dir == dir => cached.clone(),
+        _ => {
+            let fresh = state.resolved_config_for(dir).await;
+            *guard = Some((dir.to_path_buf(), fresh.clone()));
+            fresh
+        }
+    };
+    outcome.map_err(|e| ApiError::internal(format!("invalid config: {e}")))
 }
 
 // -----------------------------------------------------------------------------
@@ -337,8 +334,8 @@ pub async fn api_files(
     // same enumeration — `find_excel_files` applies the config's include and
     // exclude globs and recurses — so the listing IS the build set by
     // construction and cannot drift from what the actions operate on.
-    let (config, _) = resolve_config(&state, &dir).await;
-    let input_dir = resolve_input_dir(&dir, &config.data.input_dir);
+    let config = resolve_config(&state, &dir).await?;
+    let input_dir = config.input_dir.clone();
 
     let empty: Vec<FileEntry> = Vec::new();
     if !input_dir.is_dir() {
@@ -346,8 +343,8 @@ pub async fn api_files(
     }
     let mut paths = tablec_core::core::config::find_excel_files(
         &input_dir.to_string_lossy(),
-        config.data.include.as_deref().unwrap_or(&[]),
-        config.data.exclude.as_deref().unwrap_or(&[]),
+        config.config.data.include.as_deref().unwrap_or(&[]),
+        config.config.data.exclude.as_deref().unwrap_or(&[]),
     )
     .map_err(|e| ApiError::internal(format!("failed to enumerate input files: {e}")))?;
     paths.sort();
@@ -617,14 +614,15 @@ pub async fn api_build(
         ));
     }
 
-    let (config, _config_from) = resolve_config(&state, &dir).await;
-    let input_path = resolve_input_dir(&dir, &config.data.input_dir);
+    let config = resolve_config(&state, &dir).await?;
+    let input_path = config.input_dir.clone();
     if !input_path.is_dir() {
         return Err(ApiError::bad_request(format!(
             "input directory not found: {} (input_dir = {:?} from {}); put spreadsheets there or set [data] input_dir in tablec.toml",
             input_path.display(),
-            config.data.input_dir,
-            _config_from
+            config.config.data.input_dir,
+            config
+                .config_path
                 .as_deref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "built-in defaults".to_string()),
@@ -632,21 +630,22 @@ pub async fn api_build(
     }
 
     let started = Instant::now();
-    let (project, diagnostics) = match build_project(&dir, &config, &input_path, parser.as_ref()) {
-        Ok((p, diags)) => (p, diags),
-        Err((diags, _)) => {
-            // `diags` is what `read_excel_with` reported.
-            return Ok(Json(BuildResponse {
-                format: req.format.clone(),
-                bytes: None,
-                preview_first_500: None,
-                diagnostics: diags,
-                output_path: None,
-                duration_ms: started.elapsed().as_millis(),
-                written: false,
-            }));
-        }
-    };
+    let (project, diagnostics) =
+        match build_project(&dir, &config.config, &input_path, parser.as_ref()) {
+            Ok((p, diags)) => (p, diags),
+            Err((diags, _)) => {
+                // `diags` is what `read_excel_with` reported.
+                return Ok(Json(BuildResponse {
+                    format: req.format.clone(),
+                    bytes: None,
+                    preview_first_500: None,
+                    diagnostics: diags,
+                    output_path: None,
+                    duration_ms: started.elapsed().as_millis(),
+                    written: false,
+                }));
+            }
+        };
 
     let bytes: Vec<u8> = match req.format.as_str() {
         "json" => JsonFmt {
@@ -669,8 +668,13 @@ pub async fn api_build(
 
     let output_path = req.output_path.clone().or_else(|| {
         Some(
-            dir.join(&config.export.output_dir)
-                .join(format!("{}.{}", config.project.name, ext_for(&req.format)))
+            config
+                .output_dir
+                .join(format!(
+                    "{}.{}",
+                    config.config.project.name,
+                    ext_for(&req.format)
+                ))
                 .display()
                 .to_string(),
         )
@@ -827,14 +831,15 @@ pub async fn api_check(
             "plugin_paths from HTTP requests are not accepted (CLI flag only)",
         ));
     }
-    let (config, config_from) = resolve_config(&state, &dir).await;
-    let input_path = resolve_input_dir(&dir, &config.data.input_dir);
+    let config = resolve_config(&state, &dir).await?;
+    let input_path = config.input_dir.clone();
     if !input_path.is_dir() {
         return Err(ApiError::bad_request(format!(
             "input directory not found: {} (input_dir = {:?} from {}); put spreadsheets there or set [data] input_dir in tablec.toml",
             input_path.display(),
-            config.data.input_dir,
-            config_from
+            config.config.data.input_dir,
+            config
+                .config_path
                 .as_deref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "built-in defaults".to_string()),
@@ -848,8 +853,8 @@ pub async fn api_check(
     // resolve and each project diagnostic is reported once.
     let outcome = check_project(
         &input_path.to_string_lossy(),
-        config.data.include.as_deref().unwrap_or(&[]),
-        config.data.exclude.as_deref().unwrap_or(&[]),
+        config.config.data.include.as_deref().unwrap_or(&[]),
+        config.config.data.exclude.as_deref().unwrap_or(&[]),
         parser.as_ref(),
     )
     .map_err(|e| ApiError::internal(format!("enumerate: {e}")))?;

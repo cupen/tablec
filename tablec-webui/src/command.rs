@@ -57,6 +57,16 @@ impl WebuiCommand {
         let parser_name = self.parser.clone();
         let config_override = self.config.clone();
 
+        // Fail fast on an unreadable or invalid config: abort startup with
+        // the offending key named instead of silently serving with defaults.
+        let cwd = std::env::current_dir()?;
+        tablec_core::core::config::ResolvedConfig::resolve_in(
+            &cwd,
+            config_override.as_deref(),
+            &dir,
+            &dir,
+        )?;
+
         let state = Arc::new(WebuiState::new(
             dir.clone(),
             registry,
