@@ -3,6 +3,7 @@ use std::error::Error;
 
 pub mod json;
 pub mod msgpack;
+pub mod report;
 // pub mod protobuf;
 
 /// Unified export format trait
@@ -13,3 +14,4 @@ pub trait Format {
 
 pub use json::Json;
 pub use msgpack::Msgpack;
+pub use report::Report;

@@ -234,13 +234,23 @@ impl SchemaParser for StandardSchemaParser {
 
     fn parse_schema(
         &self,
-        _sheet_name: &str,
+        sheet_name: &str,
         sheet: &[Vec<String>],
     ) -> Result<SchemaParseResult, Vec<crate::core::diagnostic::Diagnostic>> {
         use crate::core::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
         use crate::core::table::constraint::Constraint;
         use crate::core::table::field::{Field, FieldType};
         use std::str::FromStr;
+
+        // Constraint diagnostics inherit this location: without the sheet
+        // name, cross-table violations can't be attributed to their sheet
+        // (the report's passed-sheet list would wrongly include them).
+        let cell_loc = |line: u32, column: u32| SourceLocation {
+            file: None,
+            sheet: Some(sheet_name.to_string()),
+            line: Some(line),
+            column: Some(column),
+        };
 
         if sheet.is_empty() {
             return Err(vec![Diagnostic::new(
@@ -285,7 +295,7 @@ impl SchemaParser for StandardSchemaParser {
                     SourceLocation::default(),
                 )]);
             }
-            let loc = SourceLocation::default();
+            let loc = cell_loc(5, col_idx as u32 + 1);
             match Constraint::from_str_with_loc(cell, loc) {
                 Ok(c) => table_constraints.push(c),
                 Err(d) => return Err(vec![d]),
@@ -306,7 +316,11 @@ impl SchemaParser for StandardSchemaParser {
                 t: FieldType::from_str(field_types_str.get(i).map(|s| s.as_str()).unwrap_or(""))
                     .unwrap_or(FieldType::String),
                 desc: field_comments.get(i).cloned().unwrap_or_default(),
-                constraint: Constraint::from_str(&raw_constraint).ok(),
+                constraint: Constraint::from_str_with_loc(
+                    &raw_constraint,
+                    cell_loc(4, i as u32 + 1),
+                )
+                .ok(),
                 tags: {
                     let mut tags = Vec::new();
                     if let Some(start) = name.find('[') {

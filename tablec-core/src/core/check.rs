@@ -20,6 +20,7 @@ use crate::core::diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceLocati
 use crate::core::schema::SchemaParser;
 use crate::core::table::constraint::ConstraintValidator;
 use crate::core::table::table::{Table, read_excel_with};
+use std::path::PathBuf;
 
 /// Result of a full check run over an input directory.
 #[derive(Debug)]
@@ -29,6 +30,9 @@ pub struct CheckOutcome {
     /// All diagnostics: parse errors (file order) → per-table (table order)
     /// → project (table order).
     pub diagnostics: Vec<Diagnostic>,
+    /// The spreadsheet files the pipeline enumerated and processed, in
+    /// enumeration order — including files that failed to parse.
+    pub files: Vec<PathBuf>,
 }
 
 /// Run the shared check pipeline over `input_dir`.
@@ -48,6 +52,7 @@ pub fn check_project(
     let mut outcome = CheckOutcome {
         tables: Vec::new(),
         diagnostics: Vec::new(),
+        files: files.clone(),
     };
 
     if files.is_empty() {
@@ -168,6 +173,31 @@ mod tests {
     // ---------------------------------------------------------------------
     // Cross-file @ref: clean only with the full table set
     // ---------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------
+    // File census: the outcome carries the enumerated files
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn outcome_files_lists_enumerated_files_even_when_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let items = write_items(tmp.path(), "b_items.xlsx", &["1", "2"]);
+        let drop = write_drop(tmp.path(), "a_drop.xlsx", &["1", "2"]);
+
+        let outcome = std_check(tmp.path());
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "fixture must be clean, got: {:?}",
+            outcome.diagnostics
+        );
+        // The census is the enumeration, not the diagnostics: a fully clean
+        // run still names every file it checked.
+        let mut files: Vec<&Path> = outcome.files.iter().map(|f| f.as_path()).collect();
+        files.sort();
+        let mut expected: Vec<&Path> = vec![items.as_path(), drop.as_path()];
+        expected.sort();
+        assert_eq!(files, expected);
+    }
 
     #[test]
     fn cross_file_ref_validates_clean_only_with_full_set() {

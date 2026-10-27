@@ -1,9 +1,10 @@
 use clap::Args;
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use tablec_core::core::check::check_project;
+use tablec_core::core::check::{CheckOutcome, check_project};
 use tablec_core::core::config::{Config, ResolvedConfig};
 use tablec_core::core::diagnostic::{Diagnostic, Severity};
+use tablec_core::export::report::Report;
 
 #[derive(Args, Debug)]
 pub struct CheckCommand {
@@ -25,6 +26,47 @@ pub struct CheckCommand {
     /// Additional schema parser plugin library path. May be repeated.
     #[arg(long = "plugin-path", value_name = "PATH")]
     pub plugin_paths: Vec<String>,
+
+    /// Write a validation report to PATH. May be repeated; the format is
+    /// inferred from the file extension (`.json` / `.html`).
+    #[arg(long = "report", value_name = "PATH")]
+    pub report: Vec<PathBuf>,
+}
+
+/// A requested report format, inferred from the file extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportFormat {
+    Json,
+    Html,
+}
+
+impl ReportFormat {
+    fn render(self, report: &Report) -> String {
+        match self {
+            ReportFormat::Json => report.render_json(),
+            ReportFormat::Html => report.render_html(),
+        }
+    }
+}
+
+/// Infer a report's format from the requested path's extension: `.json`
+/// produces a JSON report, `.html` an HTML report. Any other extension,
+/// including a missing one, is rejected with the supported list.
+/// Case-insensitive on the extension itself.
+pub fn resolve_report_format(path: &Path) -> Result<ReportFormat, String> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("json") => Ok(ReportFormat::Json),
+        Some("html") => Ok(ReportFormat::Html),
+        _ => Err(format!(
+            "unsupported report extension for '{}' — supported extensions: .json, .html",
+            path.display()
+        )),
+    }
 }
 
 impl CheckCommand {
@@ -78,6 +120,28 @@ fn target_scope(path: &Path, config: &Config) -> (PathBuf, Vec<String>, Vec<Stri
     }
 }
 
+/// Render every requested report from one [`Report`] value, overwrite each
+/// path, and print the written paths to stdout. A write failure is fatal
+/// with an error naming the unwritable path — even when the check itself
+/// found no errors (the user asked for an artifact; silently succeeding
+/// without it would be worse).
+fn write_report_files(
+    report: &Report,
+    targets: &[(PathBuf, ReportFormat)],
+) -> Result<(), Box<dyn Error>> {
+    for (path, format) in targets {
+        let content = format.render(report);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to write report '{}': {e}", path.display()))?;
+        }
+        std::fs::write(path, content)
+            .map_err(|e| format!("failed to write report '{}': {e}", path.display()))?;
+        println!("Report written: {}", path.display());
+    }
+    Ok(())
+}
+
 fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
     println!("Checking tables...");
     let cwd =
@@ -87,6 +151,14 @@ fn _run(c: CheckCommand) -> Result<(), Box<dyn Error>> {
 
 /// [`_run`] with the process cwd made explicit (unit-testable).
 fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
+    // Fail fast on every requested report extension before any file scan:
+    // a bad request must produce no report files and scan nothing.
+    let report_targets: Vec<(PathBuf, ReportFormat)> = c
+        .report
+        .iter()
+        .map(|p| resolve_report_format(p).map(|f| (p.clone(), f)))
+        .collect::<Result<_, _>>()?;
+
     // Discovery target: the CLI path's directory (a file's parent), or the
     // cwd when no path is given.
     let target_dir: PathBuf = match &c.path {
@@ -112,6 +184,7 @@ fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
         .chain(c.plugin_paths.iter().map(PathBuf::from))
         .collect();
     let parser = crate::parser_resolve::resolve_parser(&config, c.parser.as_deref(), &plugin_paths);
+    let parser_name = parser.name().to_string();
 
     // CLI path takes precedence; otherwise the config's resolved input_dir.
     let path: PathBuf = match c.path {
@@ -121,6 +194,20 @@ fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
 
     if !path.exists() {
         println!("No Excel files found to check.");
+        // No outcome was produced: the report records a run that checked
+        // nothing, naming the requested target as the input directory.
+        let outcome = CheckOutcome {
+            tables: Vec::new(),
+            diagnostics: Vec::new(),
+            files: Vec::new(),
+        };
+        let report = Report::from_outcome(
+            &outcome,
+            env!("CARGO_PKG_VERSION"),
+            &path.to_string_lossy(),
+            &parser_name,
+        );
+        write_report_files(&report, &report_targets)?;
         return Ok(());
     }
     let (input_dir, include, exclude) = target_scope(&path, &config);
@@ -132,8 +219,17 @@ fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
         parser.as_ref(),
     )?;
 
+    // One Report value per run; every requested format renders from it.
+    let report = Report::from_outcome(
+        &outcome,
+        env!("CARGO_PKG_VERSION"),
+        &input_dir.to_string_lossy(),
+        &parser_name,
+    );
+
     if is_no_files_notice(&outcome.diagnostics) {
         println!("No Excel files found to check.");
+        write_report_files(&report, &report_targets)?;
         return Ok(());
     }
 
@@ -155,11 +251,15 @@ fn _run_in(c: CheckCommand, cwd: &Path) -> Result<(), Box<dyn Error>> {
     let total_errors = error_count(&outcome.diagnostics);
     if total_errors > 0 {
         println!("\nFound {} errors.", total_errors);
+        // The report is an artifact of this failed run: write it before the
+        // exit code goes non-zero.
+        write_report_files(&report, &report_targets)?;
         // Return an error to indicate failure
         return Err(format!("{} errors found during check", total_errors).into());
     }
 
     println!("\nCheck finished successfully. No errors found.");
+    write_report_files(&report, &report_targets)?;
     Ok(())
 }
 
@@ -299,6 +399,7 @@ mod tests {
             path: Some(target.path().to_path_buf()),
             parser: None,
             plugin_paths: Vec::new(),
+            report: Vec::new(),
         };
         // Only sheet A is in scope when the cwd config governs — proven by
         // running the shared pipeline with the resolved scope ourselves.
@@ -346,6 +447,7 @@ mod tests {
             path: None,
             parser: None,
             plugin_paths: Vec::new(),
+            report: Vec::new(),
         };
         // The command's own resolution path: no path arg → the config's
         // input_dir governs and the run must succeed end to end.
@@ -364,5 +466,296 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.tables.len(), 1);
         assert_eq!(outcome.tables[0].name, "S");
+    }
+
+    // -------------------------------------------------------------------
+    // 2.1 --report extension resolution
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn report_extensions_resolve_to_formats() {
+        assert_eq!(
+            resolve_report_format(Path::new("out/report.json")),
+            Ok(ReportFormat::Json)
+        );
+        assert_eq!(
+            resolve_report_format(Path::new("out/report.html")),
+            Ok(ReportFormat::Html)
+        );
+    }
+
+    #[test]
+    fn unsupported_report_extensions_rejected_naming_supported_ones() {
+        for p in ["out/report.htm", "out/report", "out/report.xml"] {
+            let err = resolve_report_format(Path::new(p)).unwrap_err();
+            assert!(err.contains(".json"), "{p}: error must name .json: {err}");
+            assert!(err.contains(".html"), "{p}: error must name .html: {err}");
+            assert!(err.contains(p), "{p}: error must name the path: {err}");
+        }
+    }
+
+    #[test]
+    fn report_extension_is_case_insensitive() {
+        assert_eq!(
+            resolve_report_format(Path::new("out/report.JSON")),
+            Ok(ReportFormat::Json)
+        );
+        assert_eq!(
+            resolve_report_format(Path::new("out/report.Html")),
+            Ok(ReportFormat::Html)
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // 2.2 Report writing on every exit path
+    // -------------------------------------------------------------------
+
+    fn cmd_with_report(path: Option<PathBuf>, reports: &[PathBuf]) -> CheckCommand {
+        CheckCommand {
+            config: None,
+            verbose: false,
+            path,
+            parser: None,
+            plugin_paths: Vec::new(),
+            report: reports.to_vec(),
+        }
+    }
+
+    /// A sheet with an out-of-range int8 value → one parse error diagnostic.
+    fn write_sheet_with_error(path: &Path, name: &str) {
+        let mut wb = Workbook::new();
+        let sheet = wb.add_worksheet();
+        sheet.set_name(name).ok();
+        sheet.write_string(0, 0, "id").ok();
+        sheet.write_string(1, 0, "int8").ok();
+        sheet.write_string(2, 0, "").ok();
+        sheet.write_string(3, 0, "").ok();
+        sheet.write_string(4, 0, "").ok();
+        sheet.write_string(5, 0, "200").ok();
+        wb.save(path).unwrap();
+    }
+
+    #[test]
+    fn clean_run_writes_report_with_zero_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        let report_path = dir.path().join("report.json");
+
+        let r = _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        );
+        r.expect("clean check must succeed");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(v["schema_version"], 1);
+        assert_eq!(v["summary"]["errors"], 0);
+        assert_eq!(v["summary"]["warnings"], 0);
+        assert_eq!(v["summary"]["tables_checked"], 1);
+        assert_eq!(
+            v["diagnostics"].as_array().unwrap().len(),
+            0,
+            "clean run has an empty diagnostics array"
+        );
+    }
+
+    #[test]
+    fn error_run_writes_report_and_exits_non_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet_with_error(&dir.path().join("bad.xlsx"), "Bad");
+        let report_path = dir.path().join("report.json");
+
+        let r = _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        );
+        assert!(r.is_err(), "errors keep the exit status non-zero");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(v["summary"]["errors"], 1);
+        let diags = v["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0]["severity"], "Error");
+    }
+
+    #[test]
+    fn no_matching_files_run_writes_report() {
+        let dir = tempfile::tempdir().unwrap(); // exists, holds no *.xlsx
+        let report_path = dir.path().join("report.json");
+
+        let r = _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        );
+        r.expect("a no-files notice is not an error");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(v["summary"]["errors"], 0);
+        assert_eq!(v["summary"]["warnings"], 1, "the no-files warning counts");
+        assert_eq!(v["summary"]["files_checked"], 0);
+        assert_eq!(v["summary"]["tables_checked"], 0);
+    }
+
+    #[test]
+    fn non_existent_target_writes_report_of_empty_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no_such.xlsx");
+        let report_path = dir.path().join("report.json");
+
+        let r = _run_in(
+            cmd_with_report(Some(missing.clone()), &[report_path.clone()]),
+            dir.path(),
+        );
+        r.expect("missing target stays a non-error notice");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(v["summary"]["errors"], 0);
+        assert_eq!(v["summary"]["warnings"], 0);
+        assert_eq!(v["summary"]["files_checked"], 0);
+        assert_eq!(v["summary"]["tables_checked"], 0);
+        assert_eq!(
+            v["input_dir"],
+            missing.to_string_lossy().as_ref(),
+            "the report names the requested (missing) target"
+        );
+    }
+
+    #[test]
+    fn report_overwrites_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        let report_path = dir.path().join("report.html");
+        std::fs::write(&report_path, "stale junk").unwrap();
+
+        _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        )
+        .expect("clean check");
+
+        let content = std::fs::read_to_string(&report_path).unwrap();
+        assert!(
+            content.starts_with("<!DOCTYPE html>"),
+            "stale file must be replaced by the new run's HTML report"
+        );
+    }
+
+    #[test]
+    fn both_formats_written_from_one_run_with_matching_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        let json_path = dir.path().join("report.json");
+        let html_path = dir.path().join("report.html");
+
+        _run_in(
+            cmd_with_report(
+                Some(dir.path().to_path_buf()),
+                &[json_path.clone(), html_path.clone()],
+            ),
+            dir.path(),
+        )
+        .expect("clean check");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
+        let html = std::fs::read_to_string(&html_path).unwrap();
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert_eq!(
+            v["summary"]["errors"].as_u64().unwrap(),
+            0,
+            "both artifacts describe the same clean run"
+        );
+        assert_eq!(v["summary"]["tables_checked"], 1);
+        assert!(html.contains("<li>A</li>"), "sheet A is listed as passed");
+    }
+
+    #[test]
+    fn html_extension_writes_an_html_report() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        let report_path = dir.path().join("report.html");
+
+        _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        )
+        .expect("clean check");
+
+        let html = std::fs::read_to_string(&report_path).unwrap();
+        assert!(html.contains("校验报告"), "Chinese UI labels present");
+    }
+
+    #[test]
+    fn unwritable_report_path_fails_even_on_clean_check() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        // A report path *under a regular file*: the check is clean but the
+        // artifact cannot be written.
+        let blocker = dir.path().join("blocker.json");
+        std::fs::write(&blocker, "i am a file").unwrap();
+        let report_path = blocker.join("report.json");
+
+        let r = _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[report_path.clone()]),
+            dir.path(),
+        );
+        let err = r.expect_err("write failure must fail the command");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to write report"),
+            "error must identify the failure: {msg}"
+        );
+        assert!(
+            msg.contains(report_path.to_string_lossy().as_ref()),
+            "error must name the unwritable path: {msg}"
+        );
+    }
+
+    #[test]
+    fn unsupported_extension_fails_before_scanning_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+        let bad_report = dir.path().join("report.xml");
+
+        let r = _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[bad_report.clone()]),
+            dir.path(),
+        );
+        let err = r.expect_err("unsupported extension must fail");
+        assert!(
+            err.to_string().contains(".json") && err.to_string().contains(".html"),
+            "error must name the supported extensions: {err}"
+        );
+        assert!(!bad_report.exists(), "no report file may be written");
+    }
+
+    // -------------------------------------------------------------------
+    // 2.3 No report file without the flag
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn no_flag_creates_no_report_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sheet(&dir.path().join("a.xlsx"), "A");
+
+        _run_in(
+            cmd_with_report(Some(dir.path().to_path_buf()), &[]),
+            dir.path(),
+        )
+        .expect("clean check without --report");
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".json") || n.ends_with(".html"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no report file may be created without --report, found: {leftovers:?}"
+        );
     }
 }
