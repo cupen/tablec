@@ -34,7 +34,7 @@ Defines the behavior of the `tablec` command-line tool: its `build`, `check`, an
 - **THEN** the command fails with a message listing the supported formats
 
 ### Requirement: Format selection and file extension
-The `--format` flag SHALL support `json` (minified), `json-pretty` (indented), and `msgpack`. The extension of the written file SHALL be `.json` for `json`/`json-pretty` and `.msgpack` for `msgpack`.
+The `--format` flag SHALL support `json` (minified), `json-pretty` (indented), and `msgpack`. A config-derived default output SHALL take the extension `.json` for `json`/`json-pretty` and `.msgpack` for `msgpack`; an explicit `-o` path is used verbatim without appending an extension.
 
 #### Scenario: Extension follows format
 - **WHEN** a build uses `--format msgpack`
@@ -59,9 +59,9 @@ The `--format` flag SHALL support `json` (minified), `json-pretty` (indented), a
 - **WHEN** a checked project contains a `@ref` whose host value is absent from the target column
 - **THEN** the command reports a foreign-key violation and exits non-zero
 
-#### Scenario: Check honors the selected parser
-- **WHEN** `tablec check --parser custom` targets data requiring the `custom` schema parser
-- **THEN** the check parses the workbooks with the `custom` parser and reports its diagnostics
+#### Scenario: Check with an unregistered parser fails
+- **WHEN** `tablec check --parser not-registered` runs (no parser by that name is registered)
+- **THEN** the command fails with an error naming the parser; parser selection precedence (CLI flag over config over the `standard` default) is defined by the schema-parser-plugins capability
 
 #### Scenario: Each project diagnostic is reported once
 - **WHEN** the check target contains multiple files and a cross-table violation exists
@@ -79,14 +79,22 @@ The `--format` flag SHALL support `json` (minified), `json-pretty` (indented), a
 - **THEN** the command fails with a message about the existing file
 
 ### Requirement: Error reporting
-Command failures SHALL render diagnostics to stderr with severity color-coding, and errors found during `check` SHALL be reported on stderr with a final error count. Build progress and per-table stats SHALL be printed to stderr, and successful export messages SHALL be printed to stdout.
+Command failures SHALL render diagnostics to stderr as plain-text lines prefixed with the severity (`error` / `warning`); no color-coding is applied. Errors found during `check` SHALL be summarized with a final `Found N errors.` count printed to stdout, and the command SHALL exit non-zero. Build progress and per-table stats SHALL be printed to stderr, and successful export messages SHALL be printed to stdout.
 
 #### Scenario: Diagnostics render to stderr
 - **WHEN** a build or check encounters parse or constraint diagnostics
 - **THEN** they appear on stderr
 
+#### Scenario: Check error count lands on stdout
+- **WHEN** `tablec check` finds errors
+- **THEN** the summary `Found N errors.` appears on stdout and the command exits non-zero
+
 ### Requirement: Tablec toml config
-The tool SHALL accept `tablec.toml` (preferred) or `.tablec.toml` with `[project]` (name, version, description), `[data]` (input_dir, include, exclude), `[export]` (format, output_dir, include_fields), `[parser]` (name), and `[[plugins]]` (path). Every section and field SHALL be optional with defaults: `project.name = "default"`, `data.input_dir = "."`, `data.include = ["*.xlsx"]`, `export.format = "json"`, `export.output_dir = "output"`, `export.include_fields = false`; `exclude`, `[parser]`, and `[[plugins]]` default to empty/absent. The `export.pretty` field SHALL NOT exist (indentation is expressed by `format = "json-pretty"`). Unknown keys SHALL be rejected with an error naming the offending key. Config discovery SHALL resolve identically for `build` and `check`: `--config` if given, else `tablec.toml`/`.tablec.toml` in the process cwd, else `tablec.toml`/`.tablec.toml` in the target directory, else all defaults. Relative values of `data.input_dir`, `export.output_dir`, and `plugins[].path` SHALL resolve against the directory containing the config file (absolute paths pass through); when no config file was found they resolve against the cwd. CLI flags SHALL override config values.
+The tool SHALL accept `tablec.toml` (preferred) or `.tablec.toml` with `[project]` (name, version, description), `[data]` (input_dir, include, exclude), `[export]` (format, output_dir, include_fields), `[parser]` (name), and `[[plugins]]` (path). Every section and field SHALL be optional with defaults: `project.name = "default"`, `data.input_dir = "."`, `data.include = ["*.xlsx"]`, `export.format = "json"`, `export.output_dir = "output"`, `export.include_fields = false`; `exclude`, `[parser]`, and `[[plugins]]` default to empty/absent. The `export.pretty` field SHALL NOT exist (indentation is expressed by `format = "json-pretty"`). Unknown keys SHALL be rejected with an error naming the offending key. Config discovery SHALL resolve identically for `build` and `check`: `--config` if given, else `tablec.toml`/`.tablec.toml` in the process cwd, else `tablec.toml`/`.tablec.toml` in the target directory, else all defaults. Relative values of `data.input_dir`, `export.output_dir`, and `plugins[].path` SHALL resolve against the directory containing the config file (absolute paths pass through); when no config file was found they resolve against the cwd. CLI flags SHALL override config values. Include/exclude patterns follow a fixed normalization: a pattern written with a leading `**/` (e.g. `**/*.xlsx`) is rewritten to match only the top level of the input directory — the same set as `*.xlsx`; to match nested paths the pattern MUST be written with a leading `/` (e.g. `/**/*.xlsx`).
+
+#### Scenario: Recursive include needs a leading slash
+- **WHEN** `include = ["**/*.xlsx"]` is configured and the input directory contains a root-level and a nested spreadsheet
+- **THEN** only the root-level file matches; recursion requires `include = ["/**/*.xlsx"]`
 
 #### Scenario: CLI overrides config
 - **WHEN** config sets `format = "msgpack"` but `--format json` is passed

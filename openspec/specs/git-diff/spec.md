@@ -30,7 +30,7 @@ The diff SHALL be computed between two sides: a left side that is either the wor
 - **THEN** the system rejects the request with an error naming that ref, never silently degrading to clean
 
 ### Requirement: Per-file git status
-The compared file set SHALL be every supported spreadsheet that exists on either side and lies under the webui's resolved input directory. Each file SHALL be classified as the left side's change relative to the right side (the baseline): `added` (present only on the left), `deleted` (present only on the right), `modified` (present on both sides with differing content), or `clean`. When both sides are at their defaults (`worktree` vs `HEAD`), the system SHALL preserve the working-tree-specific statuses `untracked` (present in the working tree but not tracked at HEAD) and `added` (staged in the index) alongside `modified`, `deleted`, and `clean`. For `modified` files the system SHALL report counts of added and deleted lines derived from the git diff between the two sides.
+The compared file set SHALL be every supported spreadsheet that exists on either side and lies under the webui's resolved input directory. Each file SHALL be classified as the left side's change relative to the right side (the baseline): `added` (present only on the left), `deleted` (present only on the right), `modified` (present on both sides with differing content), or `clean`. When both sides are at their defaults (`worktree` vs `HEAD`), the system SHALL preserve the working-tree-specific statuses `untracked` (present in the working tree but not tracked at HEAD) and `added` (staged in the index) alongside `modified`, `deleted`, and `clean`. For `modified` files the system SHALL report counts of added and deleted lines derived from `git diff --numstat` between the two sides; git provides no line counts for binary files such as `.xlsx`, so spreadsheet entries typically omit these counts.
 
 #### Scenario: File present only on the left
 - **WHEN** a spreadsheet exists at the left ref's tree but not at the right ref's tree
@@ -42,7 +42,7 @@ The compared file set SHALL be every supported spreadsheet that exists on either
 
 #### Scenario: Modified spreadsheet
 - **WHEN** a spreadsheet is tracked on both sides and its content differs
-- **THEN** the file reports status `modified` with added/deleted counts
+- **THEN** the file reports status `modified`; added/deleted counts are included when git's numstat provides them (it does not for binary spreadsheet files)
 
 #### Scenario: Untracked spreadsheet
 - **WHEN** both sides are at their defaults and a spreadsheet exists in the working tree but is not tracked by git
@@ -53,7 +53,7 @@ The compared file set SHALL be every supported spreadsheet that exists on either
 - **THEN** the file reports status `clean` with zero change counts
 
 ### Requirement: Per-cell diff status in parsed preview
-When the parsed preview is requested for a spreadsheet, each parsed cell of each data row SHALL carry a diff status computed between the left side's content and the right side's content: `added` (a new cell/row not present on the right side), `deleted` (a cell/row present on the right side but absent on the left side, or — for a file that exists only on the right side — every data row), `modified` (the cell exists in both but its value differs), or `unchanged`. Status derivation SHALL honor CSV/Excel cell equality: numeric values comparing equal across widths count as the same value.
+When the parsed preview is requested for a spreadsheet, each parsed cell of each data row SHALL carry a diff status computed between the left side's content and the right side's content: `added` (a new cell/row not present on the right side), `deleted` (a cell/row present on the right side but absent on the left side, or — for a file that exists only on the right side — every data row), `modified` (the cell exists in both but its value differs), or `unchanged`. Status derivation SHALL honor CSV/Excel cell equality: numeric values comparing equal across widths count as the same value. When the table declares a unique key, rows are aligned between the sides by that key: a change to a key cell itself presents as the old row `deleted` and the new row `added` rather than a `modified` cell.
 
 #### Scenario: Changed cell value
 - **WHEN** a cell's parsed value differs between the left and right sides

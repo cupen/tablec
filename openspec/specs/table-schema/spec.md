@@ -48,14 +48,14 @@ A field name MAY carry tags in `name[tag1,tag2]` form; the parsed field name SHA
 - **THEN** a `SchemaFieldOverlap` diagnostic is produced and the sheet is not included in the result
 
 ### Requirement: Type system
-The system SHALL support the field types: `int`/`int8`/`int16`/`int32`/`int64`, `uint`/`uint8`/`uint16`/`uint32`/`uint64`, `float`/`float32`/`float64`, `string`/`str`, `bool`/`boolean`, `date`, `datetime`, `timestamp32`, `timestamp64`, arrays (`type[]` and `array<type>`, nestable), maps (`map<keyType, type>` where keyType is integer or string), and structs (`struct{name:type,...}` or `{name:type,...}` with up to 32 fields, omitted type defaulting to `string`). Type strings are tokenized; an unknown type token MUST produce a `TypeUnknown` diagnostic.
+The system SHALL support the field types: `int`/`int8`/`int16`/`int32`/`int64`, `uint`/`uint8`/`uint16`/`uint32`/`uint64`, `float`/`float32`/`float64`, `string`/`str`, `bool`/`boolean`, `date`, `datetime`, `timestamp32`, `timestamp64`, arrays (`type[]` and `array<type>`, nestable), maps (`map<keyType, type>` where keyType is integer or string), and structs (`struct{name:type,...}` — the bare `{name:type,...}` form without the `struct` keyword is not accepted; there is no field-count limit; an omitted member type defaults to `string`). Type strings are tokenized; an unknown type token MUST produce a `TypeUnknown` diagnostic.
 
 #### Scenario: Each type family parses
 - **WHEN** the type strings `int`, `uint16`, `float64`, `string`, `bool`, `int[][]`, `array<array<int>>`, `map<string, int[]>`, and `struct{a:int, b:string[]}` are parsed
 - **THEN** each parses to its corresponding structured field type
 
 #### Scenario: Struct with omitted type
-- **WHEN** a struct type `{foo, bar:int}` is parsed
+- **WHEN** a struct type `struct{foo, bar:int}` is parsed
 - **THEN** `foo` is typed as `string` and `bar` as `int`
 
 #### Scenario: Unknown type token
@@ -63,15 +63,19 @@ The system SHALL support the field types: `int`/`int8`/`int16`/`int32`/`int64`, 
 - **THEN** a `TypeUnknown` diagnostic is produced
 
 ### Requirement: Schema-level default not-null
-Absent an explicit `@nullable` on a field, every data-row cell of that field MUST be non-empty: an empty string, a missing cell, or a `Value::Null` SHALL raise a `ConstraintNullNotAllowed` diagnostic before any other per-field constraint runs on that cell. A field marked `@nullable` MUST opt out of this pre-check for itself.
+Absent an explicit `@nullable` on a field, every data-row cell of that field MUST be non-empty. Value parsing runs before constraint validation: an empty cell in a non-string-typed field fails to parse (`ValueParseError`) and the file is rejected before any constraint runs. For string-typed fields an empty cell parses to the empty string, and constraint validation SHALL raise a `ConstraintNullNotAllowed` diagnostic for it before any other per-field constraint runs on that cell — provided no other parse diagnostic aborted the file read, since the read is all-or-nothing per file. A field marked `@nullable` MUST opt out of this pre-check for itself; `@nullable` does not affect value parsing, so an empty cell in a non-string-typed field still fails with `ValueParseError` even when `@nullable` is declared.
 
-#### Scenario: Empty cell without @nullable
-- **WHEN** a field has no `@nullable` and a data row contains an empty cell
+#### Scenario: Empty string cell without @nullable
+- **WHEN** a string-typed field has no `@nullable` and a data row contains an empty cell
 - **THEN** a `ConstraintNullNotAllowed` diagnostic is produced for that cell
 
-#### Scenario: Empty cell with @nullable
-- **WHEN** a field is marked `@nullable` and a data row contains an empty cell
+#### Scenario: Empty string cell with @nullable
+- **WHEN** a string-typed field is marked `@nullable` and a data row contains an empty cell
 - **THEN** no not-null diagnostic is produced for that cell
+
+#### Scenario: Empty cell in a non-string field
+- **WHEN** a field of a non-string type (e.g. `int8`) contains an empty cell
+- **THEN** a `ValueParseError` diagnostic is produced during parsing, regardless of `@nullable`
 
 ### Requirement: Date and time types are string-valued
 The `date`, `datetime`, `timestamp32`, and `timestamp64` field types SHALL be parsed and stored as string values.
