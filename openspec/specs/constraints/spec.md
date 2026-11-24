@@ -7,7 +7,7 @@ Defines the table compiler's constraint system: the `@func(...)` grammar for dec
 ## Requirements
 
 ### Requirement: Constraint declaration grammar
-A constraint cell MUST start with `@`, contain a function name, and any arguments in parentheses: `@func(arg1, arg2, ...)`. Arguments are separated by top-level commas; commas inside double quotes are literal; quoted strings support only the `\"` and `\\` escapes, and any other `\X` sequence MUST be rejected. Malformed constraints (missing `@`, missing closing parenthesis, unterminated string, unsupported escape, empty function name, or a `"` mid-argument) MUST produce a `TableConstraintParseError` diagnostic. A bare `@func` without parentheses is valid when the name is a single token.
+A constraint cell MUST start with `@`, contain a function name, and any arguments in parentheses: `@func(arg1, arg2, ...)`. Arguments are separated by top-level commas; commas inside double quotes are literal; quoted strings support only the `\"` and `\\` escapes, and any other `\X` sequence MUST be rejected. Malformed constraints (missing `@`, missing closing parenthesis, unterminated string, unsupported escape, empty function name, or a `"` mid-argument) MUST produce a `TableConstraintParseError` diagnostic. A constraint cell carries exactly one constraint function; a bare `@func` without parentheses is valid when the name is a single token.
 
 #### Scenario: Valid multi-argument constraint
 - **WHEN** the cell contains `@oneof("a,b", c)`
@@ -22,11 +22,11 @@ A constraint cell MUST start with `@`, contain a function name, and any argument
 - **THEN** a `TableConstraintParseError` diagnostic is produced because `\n` is not an allowed escape
 
 ### Requirement: @nullable
-`@nullable` marks a field as allowing empty cells, opting out of the schema-level default not-null pre-check. It takes no arguments; supplying arguments to `@nullable` MUST be rejected.
+`@nullable` marks a field as allowing empty cells: a `@nullable` field SHALL opt out of the schema-level default not-null pre-check. It is a marker flag: it takes no arguments, and any arguments supplied to `@nullable` are accepted and ignored. Because it occupies the field's single constraint slot, `@nullable` cannot be combined with another constraint on the same field. It does not affect value parsing: an empty cell in a non-string-typed field still fails with `ValueParseError`.
 
-#### Scenario: Nullable field accepts empty cell
-- **WHEN** a field declared `@nullable` has an empty cell
-- **THEN** no not-null diagnostic is produced and inner constraints (e.g. `@oneof`) skip that row
+#### Scenario: Nullable string field accepts empty cell
+- **WHEN** a string-typed field declared `@nullable` has an empty cell
+- **THEN** no not-null diagnostic is produced for that cell
 
 ### Requirement: @range
 `@range(lo, hi)` requires each cell of a single integer field to be an integer in the closed interval `[lo, hi]`. Arguments MUST be integers; `lo` MUST NOT exceed `hi`. A violation produces `ConstraintValueViolation`.
@@ -44,7 +44,7 @@ A constraint cell MUST start with `@`, contain a function name, and any argument
 - **THEN** validation fails with an error and produces a diagnostic
 
 ### Requirement: @oneof
-`@oneof(v1, v2, ...)` requires each cell to match one of the allowed values. Values that parse as `i64` go into a numeric bucket and are compared against numeric cells; all other values are treated as strings and compared against string cells. A cell that matches neither bucket produces `ConstraintNotInSet`.
+`@oneof(v1, v2, ...)` SHALL require each cell to match one of the allowed values. Values that parse as `i64` go into a numeric bucket and are compared against numeric cells; all other values are treated as strings and compared against string cells. A cell that matches neither bucket produces `ConstraintNotInSet`.
 
 #### Scenario: String enum matches
 - **WHEN** a field declared `@oneof(red, green, blue)` holds `green`

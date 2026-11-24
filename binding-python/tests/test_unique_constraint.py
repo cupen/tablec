@@ -17,6 +17,7 @@ def unique_excel_file(temp_dir):
     sheet.append(["int", "string", "string"])
     sheet.append(["#", "#", "#"])
     sheet.append(["@unique(name, city)", "", ""]) # Composite unique constraint on id, name, city
+    sheet.append(["", "", ""]) # Table-level constraint row
     sheet.append([1, "Alice", "New York"])
     sheet.append([2, "Bob", "London"])
     sheet.append([3, "Alice", "Paris"])
@@ -33,6 +34,7 @@ def duplicate_unique_excel_file(temp_dir):
     sheet.append(["int", "string", "string"])
     sheet.append(["#", "#", "#"])
     sheet.append(["@unique(name, city)", "", ""]) # Composite unique constraint on id, name, city
+    sheet.append(["", "", ""]) # Table-level constraint row
     sheet.append([1, "Alice", "New York"])
     sheet.append([2, "Bob", "London"])
     sheet.append([3, "Alice", "New York"]) # Duplicate combination

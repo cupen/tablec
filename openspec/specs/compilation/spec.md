@@ -26,15 +26,15 @@ Each data cell SHALL be parsed according to its declared field type. Numeric cel
 - **THEN** a `StructFieldCountMismatch` diagnostic is produced
 
 ### Requirement: Row and table assembly
-A parsed sheet produces a `Table` with a name (the sheet name), a schema (fields and table constraints), and data rows. Each data row SHALL preserve column order in its field map. Rows whose cells are all empty MUST be skipped. A parse error in a cell produces a diagnostic and that row omits the offending field, while remaining rows still parse.
+A parsed sheet produces a `Table` with a name (the sheet name), a schema (fields and table constraints), and data rows. Each data row SHALL preserve column order in its field map. Rows whose cells are all empty MUST be skipped. A parse error in a cell produces a diagnostic and the row assembly omits that field; parsing continues over the remaining cells and rows so all parse diagnostics are collected, but the read is all-or-nothing per file: while any parse diagnostic exists, the file's tables are not emitted to validation or export.
 
 #### Scenario: All-empty data row skipped
 - **WHEN** a data row has every cell empty
 - **THEN** the row is not added to the table's data
 
-#### Scenario: Cell parse error drops that field
+#### Scenario: Cell parse error fails the file read
 - **WHEN** a cell fails to parse for its declared type
-- **THEN** a diagnostic is produced and the row is emitted without that field
+- **THEN** a diagnostic naming the file, sheet, line, and column is produced, remaining cells and rows are still scanned for further parse diagnostics, and the file yields no tables for validation or export until it parses cleanly
 
 ### Requirement: Project model
 A `Project` SHALL aggregate tables by name with the project name, source file list, and `Meta`. `Meta` SHALL carry `version`, a 32-byte content `hash`, Unix-seconds `build_at`, the list of source file paths, and tool version info. The hash MUST be deterministic for identical content, sensitive to data row changes and to which sheets exist, and independent of field declaration order.

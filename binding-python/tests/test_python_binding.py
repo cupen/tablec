@@ -32,11 +32,13 @@ def test_build_function_json(excel_file, temp_dir):
     with open(output_file, "r") as f:
         data = json.load(f)
 
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["name"] == "Sheet1"
-    assert len(data[0]["data"]) == 2
-    assert data[0]["data"][0]["name"] == "Alice"
+    # The export is a Project named after the input file's stem.
+    assert data["name"] == "test_data"
+    assert len(data["tables"]) == 1
+    table = data["tables"][0]
+    assert table["name"] == "Sheet1"
+    assert len(table["data"]) == 2
+    assert table["data"][0]["name"] == "Alice"
 
 def test_build_function_msgpack(excel_file, temp_dir):
     output_file = temp_dir.join("output.msgpack")

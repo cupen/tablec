@@ -33,7 +33,10 @@ except ImportError:
     sys.exit(2)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BIN = REPO_ROOT / "target" / "debug" / "tablec"
+# TABLEC_BIN points at an already-built binary (e.g. the qa run's artifact);
+# without it the repo's dev build is used.
+BIN = (Path(os.environ["TABLEC_BIN"]) if os.environ.get("TABLEC_BIN")
+       else REPO_ROOT / "target" / "debug" / "tablec")
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -113,6 +116,9 @@ def make_clean_dir(root):
 def ensure_binary():
     if BIN.exists():
         return BIN
+    if os.environ.get("TABLEC_BIN"):
+        print(f"error: TABLEC_BIN points at a missing binary: {BIN}")
+        sys.exit(2)
     env = dict(os.environ)
     env["PATH"] = os.path.join(Path.home(), ".cargo", "bin") + os.pathsep + env.get("PATH", "")
     print(f"{YELLOW}binary not found, running cargo build ...{RESET}")

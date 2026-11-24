@@ -26,11 +26,16 @@
 //! next one, and a disconnected client catches up by re-fetching on reconnect.
 //! Watcher failures (missing dir, permissions, inotify watch limits) degrade to
 //! a logged no-op — the webui keeps working with manual reload.
+//!
+//! Reads are not changes: the server's own scans (listing, git diff, previews)
+//! open the watched directory and its files, so counting reads would make
+//! every refresh trigger the next one. See [`is_change`].
 
 use std::path::Path;
 use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
+use notify::event::{AccessKind, AccessMode, EventKind};
 use notify::{RecursiveMode, Watcher};
 use tokio::sync::broadcast;
 
@@ -105,17 +110,19 @@ impl WatcherState {
 
         let raw_for_callback = raw_tx.clone();
         match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if res.is_ok() {
+            match res {
                 // Dirty marker: we don't care WHICH file changed — the next
                 // rescan re-lists the directory and compares. Both familiar
                 // save styles (in-place write, temp-file+rename) map to some
                 // event here because we watch the directory, not individual
                 // files. A channel lag means events coalesce, which is fine.
-                let _ = raw_for_callback.send(());
-            } else if let Err(e) = res {
+                Ok(event) if is_change(event.kind) => {
+                    let _ = raw_for_callback.send(());
+                }
+                Ok(_) => {}
                 // Permission/limits/transient errors: keep watching; the next
                 // good event still triggers a rescan. Never fail the server.
-                eprintln!("webui watcher event error: {e}");
+                Err(e) => eprintln!("webui watcher event error: {e}"),
             }
         }) {
             Ok(mut watcher) => {
@@ -163,6 +170,19 @@ impl WatcherState {
         }
 
         state
+    }
+}
+
+/// True when an event may mean the directory's content changed.
+///
+/// Everything under [`EventKind::Access`] is a read except a close after a
+/// write: notify reports that one as `Access` too, and it is the only signal
+/// when the write itself went unnoticed. Unknown kinds stay conservative.
+fn is_change(kind: EventKind) -> bool {
+    match kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+        EventKind::Access(_) => false,
+        _ => true,
     }
 }
 
@@ -219,6 +239,106 @@ mod tests {
             }
         };
         assert!(got, "expected a files_changed broadcast after a write");
+        drop(state);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    /// What the server does on every listing: enumerate the directory and
+    /// read each spreadsheet it finds.
+    fn scan(dir: &Path) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                let _ = std::fs::read(&path).unwrap();
+            }
+        }
+    }
+
+    /// Longer than the worker's whole pipeline: an event counted as a change
+    /// would have produced a broadcast by now.
+    fn settle() {
+        std::thread::sleep(DEBOUNCE + SHUTDOWN_POLL + Duration::from_millis(200));
+    }
+
+    #[test]
+    fn reads_are_not_changes_but_everything_else_is() {
+        use notify::event::{
+            CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode,
+        };
+
+        let reads = [
+            EventKind::Access(AccessKind::Any),
+            EventKind::Access(AccessKind::Read),
+            EventKind::Access(AccessKind::Other),
+            EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            EventKind::Access(AccessKind::Open(AccessMode::Write)),
+            EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            EventKind::Access(AccessKind::Close(AccessMode::Any)),
+        ];
+        for kind in reads {
+            assert!(!is_change(kind), "{kind:?} is a read, not a change");
+        }
+
+        let changes = [
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            EventKind::Create(CreateKind::File),
+            EventKind::Create(CreateKind::Folder),
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            EventKind::Remove(RemoveKind::File),
+            EventKind::Remove(RemoveKind::Folder),
+            EventKind::Any,
+            EventKind::Other,
+        ];
+        for kind in changes {
+            assert!(is_change(kind), "{kind:?} must count as a change");
+        }
+    }
+
+    #[test]
+    fn scanning_the_dir_does_not_broadcast_or_loop() {
+        // Regression: the server's own reads used to count as changes, so
+        // every refresh triggered the next one (broadcast -> client re-fetch
+        // -> server scans -> broadcast ...) forever.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.xlsx"), b"x").unwrap();
+        let state = WatcherState::start(tmp.path());
+        assert!(state.active);
+        let mut rx = state.tx.subscribe();
+
+        // A plain scan is silent.
+        scan(tmp.path());
+        settle();
+        assert!(
+            rx.try_recv().is_err(),
+            "reads must not be reported as changes"
+        );
+
+        // A real change still broadcasts...
+        std::fs::write(tmp.path().join("a.xlsx"), b"y").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match rx.try_recv() {
+                Ok(()) => break,
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => panic!("expected a files_changed broadcast after a write"),
+            }
+        }
+
+        // ...and the scan it triggers does not start another round.
+        scan(tmp.path());
+        settle();
+        assert!(
+            rx.try_recv().is_err(),
+            "a scan must not retrigger the broadcast"
+        );
+
         drop(state);
         std::thread::sleep(Duration::from_millis(50));
     }
