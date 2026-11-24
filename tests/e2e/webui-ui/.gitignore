@@ -1,0 +1,8 @@
+# 运行时产物，绝不提交
+node_modules/
+test-results/
+playwright-report/
+
+# 根 .gitignore 的 `*.json` 会把 package.json 一并忽略；没有它新克隆上
+# `pnpm install --frozen-lockfile` 直接失败。
+!package.json
