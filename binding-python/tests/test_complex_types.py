@@ -18,7 +18,8 @@ def complex_excel_file(temp_dir):
     sheet.append(["map<string,int>", "struct{id:int,name:string}"])
     sheet.append(["#", "#"])
     sheet.append(["", ""]) # Constraints
-    sheet.append(["a:1,b:2", "{101, 'test_name'}"])
+    sheet.append(["", ""]) # Table-level constraint row
+    sheet.append(["a:1,b:2", "{id: 101, name: 'test_name'}"])
     workbook.save(file_path)
     return file_path
 
@@ -29,8 +30,10 @@ def test_complex_types(complex_excel_file, temp_dir):
     with open(output_file, "r") as f:
         data = json.load(f)
 
-    assert len(data) == 1
-    assert data[0]["name"] == "ComplexSheet"
-    assert len(data[0]["data"]) == 1
-    assert "map_data" in data[0]["data"][0]
-    assert data[0]["data"][0]["map_data"] == {"a": 1, "b": 2}
+    assert len(data["tables"]) == 1
+    table = data["tables"][0]
+    assert table["name"] == "ComplexSheet"
+    assert len(table["data"]) == 1
+    row = table["data"][0]
+    assert row["map_data"] == {"a": 1, "b": 2}
+    assert row["struct_data"] == {"id": 101, "name": "test_name"}
