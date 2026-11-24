@@ -20,7 +20,8 @@ CLI（真进程）+ 本地 webui（Rust 单二进制内嵌 SPA）+ Python 绑定
 
 ## 验收流程（qa/run.py）
 
-1. **构建**：`pnpm build`（前端 dist，嵌入用）→ `cargo build`（debug，遵循 AGENTS.md
+1. **构建**：`pnpm install --frozen-lockfile && pnpm build`（前端 dist，嵌入用；新克隆
+   没有 `node_modules`，按锁文件现装）→ `cargo build`（debug，遵循 AGENTS.md
    磁盘约定；产物形态与 release 一致）。失败断路。
 2. **单测回归**：`cargo test --workspace`。
 3. **夹具**：`tests/e2e/fixtures.py` 幂等重建 git 夹具仓库（干净 / modified / untracked /

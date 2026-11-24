@@ -262,8 +262,11 @@ def cleanup() -> None:
 
 atexit.register(cleanup)
 
-# ── 1. 构建（前端 dist → cargo build；失败断路）───────────
-build_cmd = ["bash", "-c", f"cd {WEBUI_DIR} && pnpm build && cd {ROOT} && cargo build"]
+# ── 1. 构建（前端依赖 → dist → cargo build；失败断路）────────
+# 新克隆没有 node_modules：按锁文件装一遍（已装时是秒级空转），再构建。
+build_cmd = ["bash", "-c",
+             f"cd {WEBUI_DIR} && pnpm install --frozen-lockfile && pnpm build "
+             f"&& cd {ROOT} && cargo build"]
 if not run_layer("构建", build_cmd):
     EVENTS.append("构建失败,后续层跳过")
     render_report()
